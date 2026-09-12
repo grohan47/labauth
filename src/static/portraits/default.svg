@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="Default user portrait">
+  <rect width="400" height="400" fill="#d9dde3"/>
+  <!-- Head -->
+  <circle cx="200" cy="155" r="70" fill="#606978"/>
+  <!-- Shoulders & Torso -->
+  <path d="M68 385c10-98 62-150 132-150s122 52 132 150z" fill="#606978"/>
+</svg>
+

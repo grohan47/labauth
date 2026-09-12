@@ -1,0 +1,1 @@
+"""LabAuth application source."""

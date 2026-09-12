@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+
+# Node & Frontend Build Artifacts (prevent repository bloat)
+node_modules/
+package-lock.json
+src/static/vendor/
+src/static/icons/
+
+# Packaging & distribution outputs
+dist/
+build/
+*.spec

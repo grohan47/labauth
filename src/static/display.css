@@ -1,0 +1,832 @@
+@font-face {
+  font-family: "Helvetica Neue";
+  src: local("Helvetica Neue"), local("HelveticaNeue"),
+       url("/static/fonts/HelveticaNeueRoman.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Helvetica Neue";
+  src: local("Helvetica Neue Medium"), local("HelveticaNeue-Medium"), local("HelveticaNeueMedium"),
+       url("/static/fonts/HelveticaNeueMedium.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Helvetica Neue";
+  src: local("Helvetica Neue Bold"), local("HelveticaNeue-Bold"), local("HelveticaNeueBold"),
+       url("/static/fonts/HelveticaNeueBold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --display-font-family: "Helvetica Neue", "Helvetica", "Neue Haas Grotesk", "Akzidenz-Grotesk", "Schibsted Grotesk", "Nimbus Sans", "Liberation Sans", "FreeSans", "DejaVu Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Devanagari", "Noto Sans Gurmukhi", Arial, sans-serif;
+  --sbb-typo-font-family: var(--display-font-family);
+  --display-clock-size: 9rem;
+  --clock-date-height: 1.25rem;
+  --clock-date-margin: var(--sbb-spacing-fixed-2x);
+  --display-background: light-dark(var(--sbb-color-milk), var(--sbb-color-midnight));
+  --display-surface: light-dark(var(--sbb-color-white), var(--sbb-color-charcoal));
+  --display-text: light-dark(var(--sbb-color-black), var(--sbb-color-white));
+  --display-muted: light-dark(var(--sbb-color-granite), var(--sbb-color-cement));
+  --display-border: light-dark(var(--sbb-color-cloud), var(--sbb-color-iron));
+  color-scheme: light dark;
+  font-family: var(--display-font-family);
+}
+
+html[data-theme="dark"],
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-theme="light"],
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  font-family: var(--display-font-family);
+}
+
+html,
+body,
+#q-app,
+.q-layout,
+.q-page-container,
+.q-page,
+.nicegui-content,
+.display-host {
+  height: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--display-background);
+  color: var(--display-text);
+}
+
+.nicegui-content {
+  padding: 0;
+}
+
+.display-host {
+  width: 100%;
+}
+
+.display {
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.display-shell {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.display-frame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--sbb-spacing-fixed-2x);
+  width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding-block: var(--sbb-spacing-responsive-s);
+  overflow: hidden;
+  transition: opacity 0.4s ease, filter 0.4s ease, transform 0.4s ease;
+  will-change: opacity, filter;
+}
+
+.display-frame.is-dimmed {
+  opacity: 0.18;
+  filter: blur(4px) grayscale(40%);
+  transform: scale(0.99);
+  pointer-events: none;
+}
+
+.display-header {
+  position: relative;
+  align-items: start;
+  min-width: 0;
+}
+
+.current-presence,
+.presence {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.presence-content-wrapper,
+.current-presence > div:has(.carousel-stage),
+.current-presence > div:has(.people-grid) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.display-intro {
+  grid-column: 1 / span 5;
+  min-width: 0;
+  position: relative;
+}
+
+.display-greeting {
+  display: block;
+  margin: 0;
+  color: var(--sbb-color-red);
+  --sbb-title-color: var(--sbb-color-red);
+  --sbb-title-font-size: clamp(3.25rem, 4.5vw, 4.75rem);
+  font-size: clamp(3.25rem, 4.5vw, 4.75rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  position: relative;
+  top: var(--clock-face-midpoint-y, calc(var(--clock-date-height) + var(--clock-date-margin) + var(--display-clock-size) / 2));
+  transform: translateY(-50%);
+  transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: opacity, transform;
+}
+
+.display-greeting.is-fading {
+  opacity: 0;
+}
+
+.display-summary {
+  display: block;
+  flex: 0 0 auto;
+  margin: 0 0 var(--sbb-spacing-fixed-2x);
+  color: var(--display-text);
+  font-size: var(--sbb-text-font-size-l);
+  font-weight: 500;
+  line-height: var(--sbb-typo-line-height-text);
+}
+
+/* 4-column default grid layout */
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(
+    var(--sbb-spacing-fixed-2x),
+    1.6vw,
+    var(--sbb-spacing-responsive-s)
+  );
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+
+/* Card Container: ID Card Style */
+.person-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  text-align: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: var(--sbb-border-width-1x) solid var(--display-border);
+  border-radius: var(--sbb-border-radius-4x);
+  overflow: hidden;
+  background: var(--display-surface);
+  color: var(--display-text);
+  box-sizing: border-box;
+}
+
+/* 1. Centered Header: Image and Name like an ID Card */
+.card-id-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.person-photo {
+  display: grid;
+  place-items: center;
+  margin: 0 auto;
+  background: transparent;
+}
+
+.person-photo sbb-image {
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 3.5px solid var(--sbb-color-red);
+  border-radius: 50%;
+  box-sizing: border-box;
+  object-fit: cover;
+}
+
+.person-name {
+  display: block;
+  text-align: center !important;
+  margin: 0 auto;
+  width: 100%;
+  color: var(--display-text);
+  --sbb-title-color: var(--display-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 2. Body with Virtual Centerline Grid (1fr 1fr) */
+.card-id-body {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  margin-top: auto;
+}
+
+/* Check-in row: Virtual Grid splitting line */
+.check-in {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  color: var(--display-muted);
+  line-height: 1.2;
+}
+
+.check-in .check-in-label {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.check-in .check-in-time {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--display-text);
+  white-space: nowrap;
+}
+
+/* Access pills: 2-column grid (1x2 view by default, adds rows not columns) */
+.access-list--grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sbb-spacing-fixed-2x);
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.access-list--grid sbb-chip-label {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+  --sbb-chip-label-background-color: var(--sbb-color-red) !important;
+  --sbb-chip-label-color: var(--sbb-color-white) !important;
+  --sbb-chip-label-padding-inline: 0.35rem !important;
+  padding-inline: 0.35rem !important;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tier 1: 1 to 4 cards (1 row) */
+.people-grid--1row,
+.people-grid--standard {
+  grid-template-rows: minmax(0, 1fr);
+  align-items: start;
+}
+
+.people-grid--1row .person-card,
+.people-grid--standard .person-card {
+  height: 25rem;
+  max-height: 25rem;
+  padding: var(--sbb-spacing-fixed-4x) var(--sbb-spacing-fixed-3x);
+}
+
+.people-grid--1row .person-photo,
+.people-grid--standard .person-photo {
+  height: 10rem;
+  margin-bottom: var(--sbb-spacing-fixed-3x);
+}
+
+.people-grid--1row .person-photo sbb-image,
+.people-grid--standard .person-photo sbb-image {
+  width: 10rem;
+  height: 10rem;
+  min-width: 10rem;
+  border-width: 4px;
+}
+
+.people-grid--1row .person-name,
+.people-grid--standard .person-name {
+  font-size: var(--sbb-heading-font-size-3);
+  margin-bottom: var(--sbb-spacing-fixed-2x);
+}
+
+.people-grid--1row .card-id-body {
+  gap: var(--sbb-spacing-fixed-3x);
+}
+
+.people-grid--1row .check-in {
+  font-size: var(--sbb-text-font-size-s);
+}
+
+.people-grid--1row .access-list--grid sbb-chip-label {
+  padding-block: var(--sbb-spacing-fixed-2x) !important;
+  --sbb-chip-label-padding-block: var(--sbb-spacing-fixed-2x) !important;
+  --sbb-chip-label-padding-inline: 0.35rem !important;
+  padding-inline: 0.35rem !important;
+  font-size: 0.75rem;
+}
+
+/* Tier 2: 5 to 8 cards (2 rows) & Carousel cards */
+.people-grid--2rows,
+.people-grid--compact {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  height: 100%;
+}
+
+.people-grid--2rows .person-card,
+.people-grid--compact .person-card,
+.carousel-row .person-card {
+  height: 100%;
+  padding: var(--sbb-spacing-fixed-3x);
+}
+
+.people-grid--2rows .person-photo,
+.people-grid--compact .person-photo,
+.carousel-row .person-photo {
+  height: 6.25rem;
+  margin-bottom: var(--sbb-spacing-fixed-2x);
+}
+
+.people-grid--2rows .person-photo sbb-image,
+.people-grid--compact .person-photo sbb-image,
+.carousel-row .person-photo sbb-image {
+  width: 6.25rem;
+  height: 6.25rem;
+  min-width: 6.25rem;
+  border-width: 3.5px;
+}
+
+.people-grid--2rows .person-name,
+.people-grid--compact .person-name,
+.carousel-row .person-name {
+  font-size: var(--sbb-heading-font-size-4);
+  margin-bottom: var(--sbb-spacing-fixed-2x);
+}
+
+.people-grid--2rows .card-id-body,
+.carousel-row .card-id-body {
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.people-grid--2rows .check-in,
+.carousel-row .check-in {
+  font-size: var(--sbb-text-font-size-xs);
+}
+
+.people-grid--2rows .access-list--grid sbb-chip-label,
+.carousel-row .access-list--grid sbb-chip-label {
+  padding-block: 4px !important;
+  --sbb-chip-label-padding-block: 4px !important;
+  font-size: 0.75rem;
+}
+
+/* Tier 3: 9 to 12 cards (3 rows, further vertically shrunk) */
+.people-grid--3rows,
+.people-grid--dense {
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  height: 100%;
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.people-grid--3rows .person-card,
+.people-grid--dense .person-card {
+  height: 100%;
+  padding: 8px 12px;
+}
+
+.people-grid--3rows .person-photo,
+.people-grid--dense .person-photo {
+  height: 4.25rem;
+  margin-bottom: 4px;
+}
+
+.people-grid--3rows .person-photo sbb-image,
+.people-grid--dense .person-photo sbb-image {
+  width: 4.25rem;
+  height: 4.25rem;
+  min-width: 4.25rem;
+  border-width: 3px;
+}
+
+.people-grid--3rows .person-name,
+.people-grid--dense .person-name {
+  font-size: 0.95rem;
+  line-height: 1.15;
+  margin-bottom: 4px;
+}
+
+.people-grid--3rows .card-id-body,
+.people-grid--dense .card-id-body {
+  gap: 4px;
+}
+
+.people-grid--3rows .check-in,
+.people-grid--dense .check-in {
+  font-size: 0.72rem;
+}
+
+.people-grid--3rows .access-list--grid,
+.people-grid--dense .access-list--grid {
+  gap: 4px;
+}
+
+.people-grid--3rows .access-list--grid sbb-chip-label,
+.people-grid--dense .access-list--grid sbb-chip-label {
+  padding-block: 2px !important;
+  --sbb-chip-label-padding-block: 2px !important;
+  --sbb-chip-label-padding-inline: 0.35rem !important;
+  padding-inline: 0.35rem !important;
+  font-size: 0.68rem;
+}
+
+/* Auto-scaling when more tools are authorized (shorten pill sizes) */
+.person-card--tools-3 .access-list--grid sbb-chip-label,
+.person-card--tools-4 .access-list--grid sbb-chip-label {
+  font-size: 0.64rem;
+  padding-block: 2px !important;
+  --sbb-chip-label-padding-block: 2px !important;
+  --sbb-chip-label-padding-inline: 0.25rem !important;
+  padding-inline: 0.25rem !important;
+}
+
+.people-grid--3rows .person-card--tools-3 .person-photo,
+.people-grid--3rows .person-card--tools-4 .person-photo {
+  height: 3.5rem;
+}
+
+.people-grid--3rows .person-card--tools-3 .person-photo sbb-image,
+.people-grid--3rows .person-card--tools-4 .person-photo sbb-image {
+  width: 3.5rem;
+  height: 3.5rem;
+  min-width: 3.5rem;
+  border-width: 2.5px;
+}
+
+.time-panel {
+  grid-column: -3 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-self: end;
+  color: var(--display-text);
+}
+
+.clock-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.clock-date {
+  font-family: var(--display-font-family);
+  font-size: var(--sbb-text-font-size-s);
+  font-weight: 700;
+  color: var(--display-text);
+  margin-bottom: var(--sbb-spacing-fixed-2x);
+  letter-spacing: var(--sbb-letter-spacing-heading);
+  line-height: var(--sbb-typo-line-height-heading);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.clock-stack sbb-clock {
+  width: var(--display-clock-size);
+  height: var(--display-clock-size);
+  margin-bottom: var(--sbb-spacing-fixed-1x);
+}
+
+.digital-time {
+  font-size: var(--sbb-heading-font-size-2);
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--sbb-letter-spacing-heading);
+  line-height: var(--sbb-typo-line-height-heading);
+}
+
+/* Carousel Stage & Synchronized Cross-Fade */
+.carousel-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.carousel-view {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: clamp(var(--sbb-spacing-fixed-2x), 1.6vw, var(--sbb-spacing-responsive-s));
+  width: 100%;
+  height: 100%;
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: opacity;
+}
+
+.carousel-view.is-active {
+  visibility: visible;
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.carousel-view.is-fading {
+  opacity: 0;
+}
+
+.carousel-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(var(--sbb-spacing-fixed-2x), 1.6vw, var(--sbb-spacing-responsive-s));
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .carousel-view {
+    transition: none !important;
+  }
+}
+
+.arrival-card {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.auth-alert-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.35s;
+}
+
+.auth-alert-overlay.is-active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.auth-alert-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.92);
+  z-index: 1000;
+  width: 25rem;
+  max-width: calc(100vw - 2rem);
+  background: var(--display-surface);
+  color: var(--display-text);
+  border: var(--sbb-border-width-1x) solid var(--display-border);
+  border-radius: var(--sbb-border-radius-4x);
+  box-shadow: 0 1.75rem 4.5rem rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.3s;
+  will-change: transform, opacity;
+}
+
+.auth-alert-card.is-active {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.alert-card-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--sbb-spacing-fixed-4x);
+  background: var(--display-surface);
+  border-bottom: var(--sbb-border-width-2x) solid var(--sbb-color-red);
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.alert-bar-label {
+  font-family: var(--display-font-family);
+  font-weight: 700;
+  font-size: 1.5rem;
+  color: var(--sbb-color-red);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.alert-bar-icon,
+sbb-icon.alert-bar-icon {
+  color: var(--sbb-color-red);
+  --sbb-icon-svg-width: 2rem;
+  --sbb-icon-svg-height: 2rem;
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.alert-bar-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.alert-bar-icon svg path,
+.alert-bar-icon svg polygon,
+.alert-bar-icon svg polyline {
+  fill: currentColor !important;
+}
+
+.alert-card-content {
+  margin-top: 3.5rem;
+  padding: var(--sbb-spacing-fixed-4x);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: center;
+  gap: var(--sbb-spacing-fixed-3x);
+  box-sizing: border-box;
+}
+
+.alert-card-content .person-photo {
+  height: 8.5rem;
+  margin: 0 auto;
+}
+
+.alert-card-content .person-photo sbb-image {
+  width: 8.5rem;
+  height: 8.5rem;
+  min-width: 8.5rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 5px solid var(--sbb-color-red);
+  box-shadow: 0 4px 16px rgba(235, 0, 0, 0.25);
+  box-sizing: border-box;
+  object-fit: cover;
+}
+
+.alert-card-content .person-name {
+  font-size: var(--sbb-heading-font-size-3);
+  font-weight: 700;
+  margin: 0;
+  color: var(--display-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.alert-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sbb-spacing-fixed-2x);
+  width: 100%;
+}
+
+.alert-card-content .check-in,
+.alert-card-content .check-out {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  width: 100%;
+  color: var(--display-muted);
+  font-size: var(--sbb-text-font-size-s);
+  line-height: 1.3;
+}
+
+.alert-card-content .check-in-label,
+.alert-card-content .check-out-label {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.alert-card-content .check-in-time,
+.alert-card-content .check-out-time {
+  text-align: right;
+  color: var(--display-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.alert-card-content .access-list--grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sbb-spacing-fixed-2x);
+  width: 100%;
+}
+
+.alert-card-content .access-list--grid sbb-chip-label {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  --sbb-chip-label-background-color: var(--sbb-color-red) !important;
+  --sbb-chip-label-color: var(--sbb-color-white) !important;
+  padding-block: var(--sbb-spacing-fixed-2x) !important;
+  --sbb-chip-label-padding-block: var(--sbb-spacing-fixed-2x) !important;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auth-feedback {
+  position: fixed;
+  inset-inline: var(--sbb-spacing-responsive-l);
+  inset-block-end: var(--sbb-spacing-responsive-l);
+  padding: var(--sbb-spacing-responsive-xs);
+  border-inline-start: var(--sbb-border-width-4x) solid var(--sbb-color-red);
+  background: var(--display-surface);
+  color: var(--display-text);
+}
+
+@media (min-width: 64rem) {
+  .display-intro {
+    grid-column: 1 / span 8;
+  }
+
+  .time-panel {
+    grid-column: -5 / -1;
+  }
+}
+
+@media (min-width: 90rem) {
+  .display-intro {
+    grid-column: 1 / span 10;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+
+  .display-greeting {
+    transition: none !important;
+  }
+}
