@@ -694,31 +694,42 @@ window.setPresenceSignature = (signature) => {
 };
 window.getPresenceSignature = () => lastPresenceSignature;
 
+/**
+ * Selective refresh of the analogue clock face.
+ *
+ * This uses ONLY the component's inbuilt reset (`_resetClock`), which re-arms
+ * the native animation from the current system time. We deliberately never
+ * replace the node, never set its `now` attribute and never write to its shadow
+ * DOM, so the native keyframe sweep — and therefore the tick — stays exactly as
+ * SBB ships it. If the inbuilt method is unavailable we do nothing at all: the
+ * component already re-arms itself on `visibilitychange` and on its own
+ * internal interval.
+ */
 function resyncAnalogueClock() {
   const clock = document.querySelector('.clock-stack sbb-clock');
   if (!clock) return;
+
   if (mockTime !== null) {
-    updateClockHands(mockHour, mockMinute, mockSecond || 0);
+    // An explicit mock override; re-apply it through the existing path.
+    setMockTime(mockTime, mockDate);
     return;
   }
-  // The SBB clock exposes a reset that restarts its animation from the current
-  // system time; fall back to replacing the node if it is unavailable.
+
   if (typeof clock._resetClock === 'function') {
     clock._resetClock();
-  } else {
-    const fresh = clock.cloneNode(false);
-    clock.replaceWith(fresh);
   }
-  lastAnalogueResync = Date.now();
-  updateGreetingAlignment();
 }
 
-/** Re-align the clock parts to server time without reloading the page. */
+/**
+ * Re-align the clock parts we own (#digital-time, #clock-date, theme, greeting)
+ * against server time, and refresh the analogue face via its inbuilt reset.
+ */
 async function resyncClock() {
   await syncServerTime();
   resyncAnalogueClock();
   lastRenderedSecond = -1;
   renderTime();
+  lastAnalogueResync = Date.now();
 }
 
 /** Pull the server-rendered card markup when the presence signature changes. */
@@ -903,11 +914,6 @@ async function start() {
     if (nowTimestamp - lastSyncTime >= 60_000) {
       lastSyncTime = nowTimestamp;
       syncServerTime();
-    }
-
-    // 6. Bounded analogue-clock resync (every 15 min) as a safety net
-    if (nowTimestamp - lastAnalogueResync >= 900_000) {
-      resyncAnalogueClock();
     }
   });
 }

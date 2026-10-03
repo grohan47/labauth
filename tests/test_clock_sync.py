@@ -148,6 +148,41 @@ async def run_checks() -> None:
         assert clock_present, "sbb-clock disappeared"
         print("  ✓ No reload after 8s despite ?reload=5; clock intact.")
 
+        print("\n[Step 3b] Verifying the analogue clock element is never driven...")
+        await client.evaluate("""
+            window.__labauthClock = document.querySelector('.clock-stack sbb-clock');
+            window.__labauthClock.__labauthMarker = 'clock-untouched';
+            'ok';
+        """)
+        await client.evaluate("window.resyncClock()")
+        time.sleep(0.5)
+        clock_state = await client.evaluate("""
+            (() => {
+                const current = document.querySelector('.clock-stack sbb-clock');
+                return {
+                    sameNode: current === window.__labauthClock,
+                    marker: current ? current.__labauthMarker : null,
+                    nowAttr: current ? current.getAttribute('now') : null,
+                    hasShadow: current ? Boolean(current.shadowRoot) : false
+                };
+            })()
+        """)
+        assert clock_state["sameNode"] is True, "The <sbb-clock> node was replaced!"
+        assert clock_state["marker"] == "clock-untouched", "sbb-clock node identity lost"
+        assert clock_state["nowAttr"] is None, (
+            "sbb-clock got a 'now' attribute: native rendering was overridden"
+        )
+        assert clock_state["hasShadow"] is True, "sbb-clock shadow root missing"
+        assert await client.evaluate("window.__labauthMarker") == marker, (
+            "resyncClock() navigated the page"
+        )
+        print("  ✓ <sbb-clock> untouched: same node, no 'now' override, native sweep intact.")
+        has_inbuilt = await client.evaluate(
+            "typeof document.querySelector('.clock-stack sbb-clock')._resetClock === 'function'"
+        )
+        assert has_inbuilt is True, "sbb-clock no longer exposes its inbuilt reset"
+        print("  ✓ Component's inbuilt _resetClock() is the only path used to refresh it.")
+
         print("\n[Step 4] Verifying in-place card reconciliation...")
         initial_signature = await client.evaluate("window.getPresenceSignature()")
         assert isinstance(initial_signature, str), "Initial presence signature not a string"
