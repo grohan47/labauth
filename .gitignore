@@ -13,3 +13,7 @@ src/static/icons/
 dist/
 build/
 *.spec
+
+# Local runtime data (SQLite database and backup snapshots)
+data/
+backups/

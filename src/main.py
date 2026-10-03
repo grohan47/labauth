@@ -7,6 +7,7 @@ from nicegui import app, ui
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse
 
+import database as db
 from presence import store
 from ui.admin_display import (
     admin_password_is_valid,
@@ -72,7 +73,17 @@ async def api_check_in(request: Request) -> JSONResponse:
     checked_in = data.get("checked_in")
     if checked_in:
         checked_in = str(checked_in).strip()
-    person = store.check_in(name=name, photo=photo, access=access, checked_in=checked_in)
+    plaksha_id = data.get("plaksha_id")
+    if plaksha_id:
+        plaksha_id = str(plaksha_id).strip()
+    person = store.check_in(
+        name=name,
+        photo=photo,
+        access=access,
+        checked_in=checked_in,
+        is_temp=bool(data.get("is_temp", False)),
+        plaksha_id=plaksha_id,
+    )
     return JSONResponse({
         "status": "ok",
         "person": person.to_dict(),
@@ -144,6 +155,7 @@ async def api_admin_login(request: Request) -> JSONResponse:
     if not admin_password_is_valid(password):
         return JSONResponse({"error": "Incorrect password."}, status_code=401)
     token = create_admin_session()
+    db.log_audit("admin", "admin_login", "session")
     resp = JSONResponse({"status": "ok", "redirect": "/admin"})
     resp.set_cookie(
         key=SESSION_COOKIE_NAME,
@@ -189,7 +201,18 @@ async def api_post_alerts(request: Request) -> JSONResponse:
     except Exception:
         data = {}
     alert_text = data.get("alert")
+    previous = store.get_alert()
     store.set_alert(alert_text)
+    current = store.get_alert()
+    if previous != current:
+        db.log_audit(
+            "admin",
+            "settings_changed",
+            "display",
+            entity_id="alert",
+            before=previous,
+            after=current,
+        )
     return JSONResponse({
         "status": "ok",
         "alert": store.get_alert(),
