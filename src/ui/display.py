@@ -142,6 +142,21 @@ def _presence_content(people: tuple[PersonInside, ...] | None = None) -> str:
     return f'<div class="carousel-stage">{views}</div>'
 
 
+def presence_signature(people: tuple[PersonInside, ...] | None = None) -> str:
+    """Cheap fingerprint of the current presence used for client reconciliation."""
+    if people is None:
+        people = store.get_people()
+    return "|".join(
+        f"{p.user_id}:{p.name}:{p.checked_in}:{','.join(p.access)}:{int(p.is_temp)}"
+        for p in people
+    )
+
+
+def render_presence_html(people: tuple[PersonInside, ...] | None = None) -> str:
+    """Server-rendered card markup, reused for in-place client refreshes."""
+    return _presence_content(people)
+
+
 from pathlib import Path
 
 
@@ -187,6 +202,7 @@ def build_display(*, admin: bool = False) -> None:
         init_mock_js += f'window.INITIAL_MOCK_DATE = "{init_mock_d}";\n'
     if init_event:
         init_mock_js += f"window.INITIAL_AUTH_EVENT = {json.dumps(init_event)};\n"
+    init_mock_js += f"window.INITIAL_PRESENCE_SIGNATURE = {json.dumps(presence_signature())};\n"
 
     initial_theme = _color_scheme()
     ui.add_head_html(
@@ -273,6 +289,10 @@ def build_display(*, admin: bool = False) -> None:
                     else:
                         client.run_javascript("if (window.setMockTime) window.setMockTime(null);")
                     client.run_javascript("if (window.updateGreetingAlignment) window.updateGreetingAlignment();")
+                    client.run_javascript(
+                        "if (window.setPresenceSignature) "
+                        f"window.setPresenceSignature({json.dumps(presence_signature())});"
+                    )
                     if event:
                         event_json = json.dumps(event)
                         client.run_javascript(f"if (window.handleAuthEvent) window.handleAuthEvent({event_json});")

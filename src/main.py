@@ -17,7 +17,7 @@ from ui.admin_display import (
     destroy_admin_session,
     is_admin_session_valid,
 )
-from ui.display import build_display
+from ui.display import build_display, presence_signature, render_presence_html
 
 SESSION_COOKIE_NAME = "labauth_admin_session"
 
@@ -45,6 +45,16 @@ def api_get_presence() -> JSONResponse:
     return JSONResponse({
         "count": len(people),
         "people": [p.to_dict() for p in people],
+    })
+
+
+@app.get("/api/presence/render")
+def api_render_presence() -> JSONResponse:
+    """Server-rendered card markup plus a signature, for in-place client sync."""
+    people = store.get_people()
+    return JSONResponse({
+        "signature": presence_signature(people),
+        "html": render_presence_html(people),
     })
 
 

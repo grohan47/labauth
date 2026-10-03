@@ -530,10 +530,8 @@ function processAlertQueue() {
       overlay.hidden = true;
       overlay.innerHTML = '';
       isDisplayingAlert = false;
-      if (typeof reloadPending !== 'undefined' && reloadPending && typeof canSafelyReload === 'function' && canSafelyReload()) {
-        reloadPending = false;
-        window.location.reload();
-      }
+      // Reconcile any presence change that happened behind the alert, in place.
+      refreshPresence();
     }, 350);
     return;
   }
@@ -677,72 +675,73 @@ window.setTestOccupants = function (count) {
   }
 };
 
-let reloadPending = false;
-const pageStartTime = Date.now();
-const displayUrlParams = new URLSearchParams(window.location.search);
-const reloadParam = displayUrlParams.get('reload');
-// Default reload interval: 180 seconds (3 minutes), or configurable via ?reload=N
-const reloadIntervalSeconds = reloadParam ? Math.max(5, parseInt(reloadParam, 10)) : 180;
-let lastBlurTime = 0;
-let isUnfocused = typeof document.hasFocus === 'function' ? !document.hasFocus() : false;
+// --- In-place synchronisation (no full-page reload) -------------------------
+//
+// The display previously hard-reloaded on an interval to keep the analogue
+// clock and the presence cards fresh. That reload was visually jarring. Both are
+// now kept correct in place by:
+//   * ticking the digital clock against server-corrected time,
+//   * asking the SBB clock to restart its native animation when needed,
+//   * reconciling the presence cards against the server-rendered markup.
+let lastPresenceSignature =
+  typeof window.INITIAL_PRESENCE_SIGNATURE === 'string'
+    ? window.INITIAL_PRESENCE_SIGNATURE
+    : null;
+let lastAnalogueResync = Date.now();
 
-function canSafelyReload() {
-  return (
-    !isDisplayingAlert &&
-    alertQueue.length === 0 &&
-    !window.hasMockTime &&
-    mockTime === null &&
-    !isFadingGreeting &&
-    !isFadingCarousel
-  );
-}
+window.setPresenceSignature = (signature) => {
+  if (typeof signature === 'string') lastPresenceSignature = signature;
+};
+window.getPresenceSignature = () => lastPresenceSignature;
 
-function triggerReload() {
-  if (window.hasMockTime || mockTime !== null) {
+function resyncAnalogueClock() {
+  const clock = document.querySelector('.clock-stack sbb-clock');
+  if (!clock) return;
+  if (mockTime !== null) {
+    updateClockHands(mockHour, mockMinute, mockSecond || 0);
     return;
   }
-  if (canSafelyReload()) {
-    reloadPending = false;
-    window.location.reload();
+  // The SBB clock exposes a reset that restarts its animation from the current
+  // system time; fall back to replacing the node if it is unavailable.
+  if (typeof clock._resetClock === 'function') {
+    clock._resetClock();
   } else {
-    reloadPending = true;
+    const fresh = clock.cloneNode(false);
+    clock.replaceWith(fresh);
+  }
+  lastAnalogueResync = Date.now();
+  updateGreetingAlignment();
+}
+
+/** Re-align the clock parts to server time without reloading the page. */
+async function resyncClock() {
+  await syncServerTime();
+  resyncAnalogueClock();
+  lastRenderedSecond = -1;
+  renderTime();
+}
+
+/** Pull the server-rendered card markup when the presence signature changes. */
+async function refreshPresence() {
+  try {
+    const res = await fetch('/api/presence/render');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || typeof data.signature !== 'string') return;
+    if (data.signature === lastPresenceSignature) return;
+    lastPresenceSignature = data.signature;
+    const wrapper = document.querySelector('.presence-content-wrapper');
+    if (wrapper && typeof data.html === 'string') {
+      wrapper.innerHTML = data.html;
+      updateGreetingAlignment();
+    }
+  } catch (err) {
+    // Network hiccup: the next tick retries.
   }
 }
 
-window.triggerReload = triggerReload;
-window.canSafelyReload = canSafelyReload;
-window.isReloadPending = () => reloadPending;
-
-function checkPeriodicReload(now) {
-  if (window.hasMockTime || mockTime !== null) return;
-  const elapsedSeconds = (Date.now() - pageStartTime) / 1000;
-
-  if (reloadIntervalSeconds < 60) {
-    // Immediate reload for rapid test intervals (e.g. ?reload=10)
-    if (elapsedSeconds >= reloadIntervalSeconds) {
-      triggerReload();
-    }
-  } else {
-    // For normal intervals >= 60s, wait until elapsed interval AND align to top of minute (:00 seconds)
-    // so sbb-clock mounts at 12 o'clock with hands pointing straight up!
-    if (elapsedSeconds >= (reloadIntervalSeconds - 5)) {
-      if (now.getSeconds() === 0 || elapsedSeconds >= (reloadIntervalSeconds + 59)) {
-        triggerReload();
-      }
-    }
-  }
-}
-
-function handleFocusRecovery() {
-  if (isUnfocused) {
-    const unfocusedDuration = lastBlurTime > 0 ? (Date.now() - lastBlurTime) : 0;
-    isUnfocused = false;
-    // If the window was unfocused/blurred for more than 45 seconds, reload cleanly to reset CSS animations and clock hands
-    if (unfocusedDuration >= 45_000 && !window.hasMockTime && mockTime === null) {
-      triggerReload();
-    }
-  }
-}
+window.resyncClock = resyncClock;
+window.refreshPresence = refreshPresence;
 
 function startUnthrottledTimer(onTick) {
   try {
@@ -802,23 +801,29 @@ async function start() {
   updateGreetingAlignment();
   window.addEventListener('resize', updateGreetingAlignment);
 
-  // Focus and visibility listeners to eliminate drift upon refocusing
-  window.addEventListener('blur', () => {
-    isUnfocused = true;
-    lastBlurTime = Date.now();
-  });
+  // Re-align the clock and cards when the tab returns to view after being
+  // hidden, instead of reloading the whole page.
+  let hiddenAt = document.hidden ? Date.now() : 0;
 
-  window.addEventListener('focus', () => {
-    handleFocusRecovery();
-  });
+  const recoverDisplay = () => {
+    const hiddenFor = hiddenAt > 0 ? Date.now() - hiddenAt : 0;
+    hiddenAt = 0;
+    if (hiddenFor >= 5_000 || Date.now() - lastAnalogueResync >= 30_000) {
+      resyncClock();
+      refreshPresence();
+    }
+  };
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      isUnfocused = true;
-      lastBlurTime = Date.now();
+      hiddenAt = Date.now();
     } else {
-      handleFocusRecovery();
+      recoverDisplay();
     }
+  });
+
+  window.addEventListener('focus', () => {
+    if (hiddenAt === 0) recoverDisplay();
   });
 
   const testAlert = urlParams.get('test_alert');
@@ -868,16 +873,19 @@ async function start() {
   let lastPollTime = 0;
   let lastGreetingTime = 0;
   let lastSyncTime = Date.now();
+  let lastPresenceRefresh = Date.now();
 
   startUnthrottledTimer(() => {
     const nowTimestamp = Date.now();
-    const effectiveNow = new Date(nowTimestamp + serverTimeOffsetMs);
 
     // 1. Digital clock & date update
     renderTime();
 
-    // 2. Periodic reload check
-    checkPeriodicReload(effectiveNow);
+    // 2. Presence reconciliation against server-rendered markup (every 30s)
+    if (nowTimestamp - lastPresenceRefresh >= 30_000) {
+      lastPresenceRefresh = nowTimestamp;
+      refreshPresence();
+    }
 
     // 3. Presence events polling (every 400ms)
     if (nowTimestamp - lastPollTime >= 400) {
@@ -895,6 +903,11 @@ async function start() {
     if (nowTimestamp - lastSyncTime >= 60_000) {
       lastSyncTime = nowTimestamp;
       syncServerTime();
+    }
+
+    // 6. Bounded analogue-clock resync (every 15 min) as a safety net
+    if (nowTimestamp - lastAnalogueResync >= 900_000) {
+      resyncAnalogueClock();
     }
   });
 }
