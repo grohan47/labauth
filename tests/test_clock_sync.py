@@ -139,7 +139,20 @@ async def run_checks() -> None:
         server = _get("/api/time")
         rendered = await client.evaluate("document.querySelector('#digital-time').innerText")
         assert rendered == server["time"], f"Digital clock {rendered} != server {server['time']}"
-        print(f"  ✓ Digital clock {rendered} matches server time.")
+        # Live mode must leave the analogue face entirely to the component, which
+        # reads the onboard clock itself.
+        now_attr = await client.evaluate(
+            "document.querySelector('.clock-stack sbb-clock').getAttribute('now')"
+        )
+        assert now_attr is None, f"Live mode must not set 'now' on sbb-clock (got {now_attr})"
+        await client.evaluate("window.resyncClock()")
+        time.sleep(0.4)
+        resynced = await client.evaluate("document.querySelector('#digital-time').innerText")
+        onboard = _get("/api/time")
+        assert resynced == onboard["time"], (
+            f"After resync, digital clock {resynced} != onboard clock {onboard['time']}"
+        )
+        print(f"  ✓ Digital clock {resynced} tracks the onboard system clock.")
 
         print("\n[Step 3] Confirming no reload occurs (legacy ?reload=5 ignored)...")
         time.sleep(8)
@@ -235,6 +248,61 @@ async def run_checks() -> None:
         time.sleep(1.5)
         assert await client.evaluate("window.__labauthMarker") == marker, "Reload during alert!"
         print("  ✓ Alert shown without reloading; card sync uses in-place updates.")
+
+        print("\n[Step 6] Verifying the mock-time test harness still renders a set time...")
+        await client.evaluate("window.location.assign('/display?time=14:15')")
+        await client.evaluate("""
+            new Promise((resolve) => {
+                const check = () => {
+                    if (window.hasMockTime && document.querySelector('.clock-stack sbb-clock')) {
+                        resolve(true);
+                    } else { setTimeout(check, 100); }
+                };
+                check();
+            })
+        """)
+        time.sleep(0.5)
+        mock_state = await client.evaluate("""
+            (() => {
+                const clock = document.querySelector('.clock-stack sbb-clock');
+                return {
+                    digital: document.querySelector('#digital-time').innerText,
+                    nowAttr: clock ? clock.getAttribute('now') : null,
+                    greeting: document.querySelector('#display-greeting').textContent.trim(),
+                    theme: document.documentElement.getAttribute('data-theme'),
+                    hasMock: Boolean(window.hasMockTime)
+                };
+            })()
+        """)
+        assert mock_state["hasMock"] is True, "Mock time not applied from ?time=14:15"
+        assert mock_state["digital"] == "14:15", f"Digital time {mock_state['digital']} != 14:15"
+        assert mock_state["nowAttr"] == "14:15:00", (
+            f"Clock 'now' not set declaratively: {mock_state['nowAttr']}"
+        )
+        assert mock_state["greeting"] == "Good afternoon!", mock_state["greeting"]
+        assert mock_state["theme"] == "light", mock_state["theme"]
+        print("  ✓ ?time=14:15 renders the dashboard at that time via the component's 'now'.")
+
+        print("\n[Step 7] Verifying reset returns the face to the onboard clock...")
+        await client.evaluate("window.setMockTime('reset')")
+        time.sleep(0.8)
+        reset_state = await client.evaluate("""
+            (() => {
+                const clock = document.querySelector('.clock-stack sbb-clock');
+                return {
+                    nowAttr: clock ? clock.getAttribute('now') : null,
+                    hasMock: Boolean(window.hasMockTime),
+                    digital: document.querySelector('#digital-time').innerText
+                };
+            })()
+        """)
+        assert reset_state["nowAttr"] is None, "Clock kept its 'now' override after reset"
+        assert reset_state["hasMock"] is False, "Mock flag still set after reset"
+        onboard = _get("/api/time")
+        assert reset_state["digital"] == onboard["time"], (
+            f"Digital time {reset_state['digital']} != onboard clock {onboard['time']}"
+        )
+        print("  ✓ Reset clears 'now'; analogue face is back on the onboard clock.")
 
         await client.close()
     finally:

@@ -205,25 +205,13 @@ function updateClockHands(hours, minutes, seconds = 0) {
   const clock = document.querySelector('.clock-stack sbb-clock');
   if (!clock) return;
 
-  const h = (hours % 12) + minutes / 60 + seconds / 3600;
-  const m = minutes + seconds / 60;
-  const s = seconds;
-  const hDeg = (h * 30).toFixed(2);
-  const mDeg = (m * 6).toFixed(2);
-  const sDeg = (s * 6).toFixed(2);
-
   const timeAttr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+  // Declarative only. The component parses `now` itself, stops its animations
+  // and renders this static time, so a mocked clock behaves exactly like a
+  // native one. We never touch its shadow DOM or private methods.
   clock.setAttribute('now', timeAttr);
   clock.now = timeAttr;
-
-  if (clock.shadowRoot) {
-    const hHand = clock.shadowRoot.querySelector('.sbb-clock__hand-hours');
-    const mHand = clock.shadowRoot.querySelector('.sbb-clock__hand-minutes');
-    const sHand = clock.shadowRoot.querySelector('.sbb-clock__hand-seconds');
-    if (hHand) hHand.style.setProperty('transform', `rotateZ(${hDeg}deg)`);
-    if (mHand) mHand.style.setProperty('transform', `rotateZ(${mDeg}deg)`);
-    if (sHand) sHand.style.setProperty('transform', `rotateZ(${sDeg}deg)`);
-  }
 }
 
 function setMockTime(timeStr, dateStr = null) {
@@ -238,19 +226,10 @@ function setMockTime(timeStr, dateStr = null) {
     window.mockTime = null;
     window.mockHour = null;
     if (clock) {
+      // Clearing `now` hands control back to the component: it restarts its own
+      // native sweep from the onboard system clock. No private calls needed.
       clock.removeAttribute('now');
       clock.now = null;
-      if (clock.shadowRoot) {
-        const hHand = clock.shadowRoot.querySelector('.sbb-clock__hand-hours');
-        const mHand = clock.shadowRoot.querySelector('.sbb-clock__hand-minutes');
-        const sHand = clock.shadowRoot.querySelector('.sbb-clock__hand-seconds');
-        if (hHand) hHand.style.removeProperty('transform');
-        if (mHand) mHand.style.removeProperty('transform');
-        if (sHand) sHand.style.removeProperty('transform');
-      }
-      if (typeof clock._startClock === 'function') {
-        clock._startClock();
-      }
     }
     renderTime();
     if (greetingElement) {
@@ -308,12 +287,17 @@ let isSyncingTime = false;
 let backendMockApplied = false;
 let lastRenderedSecond = -1;
 
+// A round trip this slow means the sample is noise rather than drift: the
+// browser and the server share the same onboard clock, so a large RTT cannot be
+// trusted to refine the offset and is discarded instead.
+const MAX_SYNC_RTT_MS = 2000;
+
 async function syncServerTime() {
   if (isSyncingTime) return;
   isSyncingTime = true;
   try {
     const t0 = performance.now();
-    const res = await fetch('/api/time');
+    const res = await fetch('/api/time', { cache: 'no-store' });
     const t1 = performance.now();
     if (!res.ok) return;
     const data = await res.json();
@@ -331,9 +315,15 @@ async function syncServerTime() {
       setMockTime('reset');
     }
 
-    if (!data.mock_time && !mockTime) {
-      const serverNowMs = data.timestamp * 1000 + (rtt / 2);
-      serverTimeOffsetMs = serverNowMs - Date.now();
+    if (!data.mock_time && !mockTime && Number.isFinite(data.timestamp) && rtt <= MAX_SYNC_RTT_MS) {
+      // RTT/2 compensation against the server's onboard-clock timestamp.
+      const nextOffset = data.timestamp * 1000 + rtt / 2 - Date.now();
+      if (Math.abs(nextOffset - serverTimeOffsetMs) >= 1) {
+        // A material step (for example an NTP correction): repaint immediately
+        // instead of waiting for the next tick.
+        lastRenderedSecond = -1;
+      }
+      serverTimeOffsetMs = nextOffset;
     }
   } catch (err) {
     // Graceful fallback to client time if server API is temporarily unreachable
@@ -357,8 +347,13 @@ function renderTime() {
     return;
   }
 
-  // Live wall-clock time synchronized to backend server time
-  // CRITICAL: DO NOT modify sbb-clock here; its native Lit/CSS keyframes provide the continuous sweep
+  // Live wall-clock time, corrected against the server, which follows the
+  // onboard system clock (the lab's time authority).
+  //
+  // CRITICAL: do NOT touch the <sbb-clock> element here. It renders the analogue
+  // face itself, straight from the onboard clock, using its native Lit/CSS
+  // keyframes. Writing its `now` attribute or its shadow-DOM hands from here
+  // knocks the tick off, so live mode leaves it completely alone.
   const now = new Date(Date.now() + serverTimeOffsetMs);
   const currentSecond = now.getSeconds();
   if (currentSecond === lastRenderedSecond) {
@@ -910,8 +905,8 @@ async function start() {
       triggerGreetingCycle();
     }
 
-    // 5. Server time re-sync (every 60s)
-    if (nowTimestamp - lastSyncTime >= 60_000) {
+    // 5. Server time re-sync (every 15s)
+    if (nowTimestamp - lastSyncTime >= 15_000) {
       lastSyncTime = nowTimestamp;
       syncServerTime();
     }
