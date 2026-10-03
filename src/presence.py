@@ -88,6 +88,7 @@ class PresenceStore:
         self._mock_date: str | None = None
         self._events: list[dict] = []
         self._event_counter: int = 0
+        self._alert: str | None = None
 
     def get_people(self) -> tuple[PersonInside, ...]:
         with self._lock:
@@ -237,6 +238,15 @@ class PresenceStore:
 
     def get_mock_date(self) -> str | None:
         return self._mock_date
+
+    def set_alert(self, text: str | None) -> None:
+        with self._lock:
+            self._alert = text.strip() if text and text.strip() else None
+        self._notify({"type": "alert", "alert": self._alert})
+
+    def get_alert(self) -> str | None:
+        with self._lock:
+            return self._alert
 
 
 store = PresenceStore()

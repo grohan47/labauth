@@ -26,8 +26,14 @@ async function bundle() {
   // 3. Bundle SBB Web Components with esbuild
   const entryCode = `
     import '@sbb-esta/lyne-elements/container.js';
+    import '@sbb-esta/lyne-elements/button.js';
     import '@sbb-esta/lyne-elements/card.js';
+    import '@sbb-esta/lyne-elements/dialog.js';
+    import '@sbb-esta/lyne-elements/form-field.js';
+    import '@sbb-esta/lyne-elements/header.js';
     import '@sbb-esta/lyne-elements/image.js';
+    import '@sbb-esta/lyne-elements/signet.js';
+    import '@sbb-esta/lyne-elements/logo.js';
     import '@sbb-esta/lyne-elements/title.js';
     import '@sbb-esta/lyne-elements/chip-label.js';
     import '@sbb-esta/lyne-elements/clock.js';
@@ -63,4 +69,3 @@ bundle().catch((err) => {
   console.error('Bundle error:', err);
   process.exit(1);
 });
-

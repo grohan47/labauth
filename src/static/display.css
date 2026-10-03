@@ -95,6 +95,7 @@ body {
   display: block;
   width: 100%;
   height: 100%;
+  --sbb-page-spacing-padding: clamp(var(--sbb-spacing-fixed-2x), 3vw, var(--sbb-spacing-responsive-l));
 }
 
 .display-frame {
@@ -105,6 +106,7 @@ body {
   height: 100dvh;
   max-height: 100dvh;
   padding-block: var(--sbb-spacing-responsive-s);
+  padding-inline: 0;
   overflow: hidden;
   transition: opacity 0.4s ease, filter 0.4s ease, transform 0.4s ease;
   will-change: opacity, filter;
@@ -317,6 +319,7 @@ body {
 /* Tier 1: 1 to 4 cards (1 row) */
 .people-grid--1row,
 .people-grid--standard {
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
   grid-template-rows: minmax(0, 1fr);
   align-items: start;
 }
@@ -801,6 +804,359 @@ sbb-icon.alert-bar-icon {
   border-inline-start: var(--sbb-border-width-4x) solid var(--sbb-color-red);
   background: var(--display-surface);
   color: var(--display-text);
+}
+
+/* Admin display: the public wallboard stays intact; Lyne supplies the chrome. */
+.admin-titlebar {
+  --sbb-header-z-index: 100;
+  --sbb-header-height: var(--sbb-spacing-fixed-14x);
+  --sbb-header-background: transparent;
+}
+
+.admin-brand {
+  display: inline-flex;
+  align-items: center;
+  color: var(--sbb-color-red);
+  text-decoration: none;
+}
+
+.admin-brand__content {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sbb-spacing-fixed-3x);
+  height: 100%;
+  vertical-align: middle;
+}
+
+.admin-brand__name {
+  color: var(--sbb-color-red);
+  font-family: Helvetica, "Helvetica Neue", Arial, sans-serif;
+  font-size: var(--sbb-text-font-size-l);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.admin-brand__logo {
+  height: 1.25rem;
+  width: auto;
+  display: block;
+}
+
+.admin-access-icon {
+  width: var(--sbb-size-icon-ui-small);
+  height: var(--sbb-size-icon-ui-small);
+  fill: currentColor;
+}
+
+.admin-display {
+  height: calc(100dvh - var(--sbb-header-vertical-spacing));
+}
+
+.admin-display .display-frame {
+  height: calc(100dvh - var(--sbb-header-vertical-spacing));
+  max-height: calc(100dvh - var(--sbb-header-vertical-spacing));
+}
+
+/* Admin password modal dialog */
+#admin-password-dialog {
+  --sbb-dialog-width: min(28rem, 92vw);
+  --sbb-dialog-padding-inline: var(--sbb-spacing-fixed-6x);
+  --sbb-dialog-padding-block: var(--sbb-spacing-fixed-5x);
+  --sbb-dialog-backdrop-color: rgba(0, 0, 0, 0.7);
+}
+
+#admin-password-dialog::backdrop {
+  backdrop-filter: blur(4px);
+}
+
+#admin-password-dialog .sbb-dialog__container::before {
+  backdrop-filter: blur(4px);
+}
+
+#admin-password-dialog sbb-dialog-title {
+  padding-inline: var(--sbb-spacing-fixed-6x) !important;
+  padding-block-start: var(--sbb-spacing-fixed-6x) !important;
+  padding-block-end: var(--sbb-spacing-fixed-2x) !important;
+  font-family: var(--display-font-family);
+  font-size: var(--sbb-heading-font-size-4);
+  font-weight: 700;
+}
+
+#admin-password-dialog sbb-dialog-content {
+  padding-inline: var(--sbb-spacing-fixed-6x) !important;
+  padding-block-start: var(--sbb-spacing-fixed-2x) !important;
+  padding-block-end: var(--sbb-spacing-fixed-4x) !important;
+  overflow: visible;
+}
+
+#admin-password-dialog sbb-dialog-actions {
+  padding-inline: var(--sbb-spacing-fixed-6x) !important;
+  padding-block: var(--sbb-spacing-fixed-4x) var(--sbb-spacing-fixed-6x) !important;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sbb-spacing-fixed-3x);
+}
+
+#admin-password-dialog sbb-dialog-close-button {
+  margin-inline-end: var(--sbb-spacing-fixed-4x) !important;
+  margin-block-start: var(--sbb-spacing-fixed-4x) !important;
+  cursor: pointer;
+}
+
+.admin-dialog__intro {
+  margin: 0 0 var(--sbb-spacing-fixed-4x);
+  color: var(--display-muted);
+}
+
+.admin-password-field {
+  display: block;
+  width: 100%;
+}
+
+.admin-password-field input {
+  font-family: var(--display-font-family);
+}
+
+#admin-password-error:not([hidden]) {
+  display: block;
+  margin-block-start: var(--sbb-spacing-fixed-2x);
+  color: var(--sbb-color-red);
+  font-size: var(--sbb-text-font-size-s);
+}
+
+.admin-panel-host {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.admin-panel {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sbb-spacing-fixed-4x) var(--sbb-spacing-responsive-xl);
+  background: var(--display-background);
+  color: var(--display-text);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.admin-panel-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100% !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  gap: 0;
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.admin-panel-shell::part(body),
+.admin-panel-shell .sbb-container__wrapper,
+.admin-panel-shell .sbb-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding-block-end: var(--sbb-spacing-fixed-3x);
+  border-block-end: var(--sbb-border-width-1x) solid var(--display-border);
+  flex-shrink: 0;
+}
+
+.admin-heading {
+  margin: 0;
+  font-family: "Helvetica Neue Bold", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  font-size: clamp(2.5rem, 5vw, 3.75rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--display-text);
+}
+
+.admin-header-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sbb-spacing-responsive-l);
+}
+
+.admin-clock-wrapper {
+  width: clamp(4rem, 5.5vw, 5.25rem);
+  height: clamp(4rem, 5.5vw, 5.25rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-clock-wrapper sbb-clock {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#admin-exit-btn {
+  cursor: pointer;
+}
+
+.admin-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: var(--sbb-spacing-responsive-l);
+  flex: 1 1 0%;
+  min-height: 0;
+  margin-block: var(--sbb-spacing-fixed-4x);
+}
+
+.admin-card {
+  --sbb-card-background-color: var(--display-surface);
+  --sbb-card-border-color: var(--display-border);
+  --sbb-card-border-width: var(--sbb-border-width-1x);
+  --sbb-card-border-style: solid;
+  --sbb-card-border-radius: var(--sbb-border-radius-4x, 0.5rem);
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  border-radius: var(--sbb-border-radius-4x, 0.5rem);
+  border: var(--sbb-border-width-1x) solid var(--display-border);
+  background: var(--display-surface);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+
+.admin-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--display-text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.admin-card-inner {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  height: 100%;
+  width: 100%;
+  padding: var(--sbb-spacing-responsive-l);
+  box-sizing: border-box;
+}
+
+.admin-card-icon {
+  width: clamp(2rem, 3vw, 2.75rem);
+  height: clamp(2rem, 3vw, 2.75rem);
+  color: var(--display-text);
+}
+
+.admin-card-label {
+  font-family: "Helvetica Neue Medium", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 500;
+  font-size: clamp(1.5rem, 2.2vw, 2rem);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--display-text);
+  margin-top: auto;
+}
+
+#admin-alerts-dialog sbb-dialog-close-button {
+  margin-inline-end: var(--sbb-spacing-fixed-4x) !important;
+  margin-block-start: var(--sbb-spacing-fixed-4x) !important;
+  cursor: pointer;
+}
+
+.admin-alert-field {
+  width: 100%;
+  margin-block-start: var(--sbb-spacing-fixed-2x);
+}
+
+.admin-active-alert-status {
+  margin-block-start: var(--sbb-spacing-fixed-3x);
+  padding: var(--sbb-spacing-fixed-2x) var(--sbb-spacing-fixed-3x);
+  background: var(--display-surface);
+  border: var(--sbb-border-width-1x) solid var(--display-border);
+  border-radius: var(--sbb-border-radius-2x);
+  font-size: var(--sbb-text-font-size-s);
+  color: var(--display-text);
+  display: flex;
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.admin-alert-status-label {
+  font-weight: 700;
+  color: var(--sbb-color-red);
+}
+
+@media (max-width: 48rem) {
+  .admin-panel {
+    height: auto;
+    min-height: 100dvh;
+    overflow-y: auto;
+  }
+  .admin-cards-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+  .admin-card {
+    min-height: 9rem;
+  }
+}
+
+@media (max-width: 63.9375rem) {
+  .display-frame {
+    gap: var(--sbb-spacing-fixed-3x);
+    padding-block: var(--sbb-spacing-fixed-3x);
+    padding-inline: 0;
+  }
+
+  .people-grid {
+    gap: var(--sbb-spacing-fixed-3x);
+  }
+
+  .people-grid--1row .person-card,
+  .people-grid--standard .person-card {
+    height: min(25rem, 56vh);
+  }
+}
+
+@media (max-width: 37.4375rem) {
+  .display-frame {
+    padding-inline: 0;
+  }
+
+  .people-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sbb-spacing-fixed-2x);
+    overflow-y: auto;
+    padding-block-end: var(--sbb-spacing-fixed-2x);
+  }
+
+  .people-grid--1row,
+  .people-grid--standard {
+    grid-template-rows: none;
+  }
+
+  .people-grid--1row .person-card,
+  .people-grid--standard .person-card {
+    height: auto;
+    min-height: 15rem;
+  }
 }
 
 @media (min-width: 64rem) {

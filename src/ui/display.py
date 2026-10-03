@@ -49,14 +49,20 @@ LYNE_ELEMENTS_VERSION = "5.8.0"
 LYNE_DESIGN_TOKENS_VERSION = "2.1.3"
 JSDELIVR_NPM = "https://cdn.jsdelivr.net/npm"
 LYNE_COMPONENT_MODULES = (
+    "button",
     "clock",
     "title",
     "container",
     "card",
+    "dialog",
+    "form-field",
+    "header",
     "image",
     "chip-label",
     "carousel",
     "icon",
+    "signet",
+    "logo",
 )
 
 
@@ -139,7 +145,7 @@ def _presence_content(people: tuple[PersonInside, ...] | None = None) -> str:
 from pathlib import Path
 
 
-def build_display() -> None:
+def build_display(*, admin: bool = False) -> None:
     if getattr(sys, "frozen", False):
         base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         static_root = base_dir / "static" if (base_dir / "static").exists() else base_dir / "src" / "static"
@@ -196,7 +202,8 @@ def build_display() -> None:
                     'entrance-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="#000" fill-rule="evenodd" d="M5.25 6.25h-.5v23.5h19V25.5h-1v3.25h-17V7.25h17v3.25h1V6.25H5.25m5.66 12.147 4.712-4.724.708.706-3.86 3.871h19.045v1H12.473l3.857 3.858-.707.707-4.712-4.712-.353-.353z" clip-rule="evenodd"/></svg>',
                     'entrance-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M3.5 4H3v16h13v-3h-1v2H4V5h11v2h1V4H3.5m3.656 8.147 3.14-3.15.709.707L8.715 12H21.01v1H8.717l2.287 2.287-.707.707-3.14-3.14-.354-.354z" clip-rule="evenodd"/></svg>',
                     'exit-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="#000" fill-rule="evenodd" d="M5.25 6.25h-.5v23.5h19V25.5h-1v3.25h-17V7.25h17v3.25h1V6.25H5.25m21.141 7.435 4.713 4.711.353.354-.352.353-4.713 4.724-.708-.707 3.861-3.87H10.5v-1h19.043l-3.859-3.858z" clip-rule="evenodd"/></svg>',
-                    'exit-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M3.5 4H3v16h13v-3h-1v2H4V5h11v2h1V4H3.5m14.212 5.005 3.142 3.141.353.354-.353.353-3.142 3.15-.707-.707L19.295 13H7v-1h12.293l-2.288-2.287z" clip-rule="evenodd"/></svg>'
+                    'exit-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="M3.5 4H3v16h13v-3h-1v2H4V5h11v2h1V4H3.5m14.212 5.005 3.142 3.141.353.354-.353.353-3.142 3.15-.707-.707L19.295 13H7v-1h12.293l-2.288-2.287z" clip-rule="evenodd"/></svg>',
+                    'cross-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="m12.707 12 5.647-5.647-.707-.707L12 11.293 6.354 5.646l-.708.707L11.293 12l-5.647 5.646.708.707L12 12.707l5.647 5.646.707-.707z" clip-rule="evenodd"/></svg>'
                 }};
                 globalThis.sbbConfig = globalThis.sbbConfig || {{}};
                 globalThis.sbbConfig.icon = globalThis.sbbConfig.icon || {{}};
@@ -208,14 +215,22 @@ def build_display() -> None:
                 }};
             }})();
         </script>
+        <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
         {sbb_styles}
-        <link rel="stylesheet" href="/static/display.css?v=26">
+        <link rel="stylesheet" href="/static/display.css?v=32">
         {sbb_scripts}
-        <script type="module" src="/static/display.js?v=26"></script>
+        <script type="module" src="/static/display.js?v=31"></script>
+        {('<script type="module" src="/static/admin-display.js?v=3"></script>' if admin else '')}
         """
     )
 
-    with ui.element("main").classes("display display-host").props(f'data-theme="{_color_scheme()}" aria-labelledby="display-greeting"'):
+    if admin:
+        from ui.admin_display import admin_chrome
+
+        ui.html(admin_chrome(), sanitize=False)
+
+    display_classes = "display display-host admin-display" if admin else "display display-host"
+    with ui.element("main").classes(display_classes).props(f'data-theme="{_color_scheme()}" aria-labelledby="display-greeting"'):
         with ui.element("sbb-container").classes("display-shell").props('color="transparent"'):
             with ui.element("div").classes("display-frame"):
                 header_markup = f"""
