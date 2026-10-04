@@ -18,6 +18,7 @@ from ui.admin_display import (
     is_admin_session_valid,
 )
 from ui.display import build_display, presence_signature, render_presence_html
+from ui.enrolment import build_enrolment_page
 
 SESSION_COOKIE_NAME = "labauth_admin_session"
 
@@ -229,6 +230,103 @@ async def api_post_alerts(request: Request) -> JSONResponse:
     })
 
 
+@app.post("/api/enrolment/complete")
+async def api_enrolment_complete(request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"status": "error", "detail": "Admin session required"}, status_code=401)
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid JSON"}, status_code=400)
+
+    name = (data.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"status": "error", "detail": "Full name is mandatory"}, status_code=422)
+
+    raw_photo = data.get("photo") or "/static/portraits/default.svg"
+    photo_path = raw_photo
+
+    if raw_photo.startswith("data:image"):
+        try:
+            import base64
+            import uuid
+            header, encoded = raw_photo.split(",", 1)
+            img_bytes = base64.b64decode(encoded)
+            filename = f"portrait_{uuid.uuid4().hex[:8]}.png"
+            dest = STATIC_ROOT / "portraits" / filename
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(img_bytes)
+            photo_path = f"/static/portraits/{filename}"
+        except Exception:
+            photo_path = "/static/portraits/default.svg"
+
+    plaksha_id = (data.get("plaksha_id") or "").strip() or None
+    phone = (data.get("phone") or "").strip() or None
+    email = (data.get("email") or "").strip() or None
+    access_areas = data.get("access") or ["Indoor lab"]
+
+    db.init_db()
+
+    try:
+        user = db.create_user(
+            name=name,
+            plaksha_id=plaksha_id,
+            photo=photo_path,
+            email=email,
+            phone=phone,
+            status="active",
+        )
+    except Exception as err:
+        return JSONResponse({"status": "error", "detail": f"Failed to create user: {err}"}, status_code=500)
+
+    if access_areas:
+        try:
+            db.set_user_access_areas(user.id, access_areas, granted_by="admin")
+        except Exception:
+            pass
+
+    if data.get("fingerprint_enrolled"):
+        try:
+            db.enroll_credential(
+                user_id=user.id,
+                credential_type="fingerprint",
+                identifier=f"fp_{user.id}_{int(time.time())}",
+            )
+        except Exception:
+            pass
+
+    nfc_uid = (data.get("nfc_uid") or "").strip()
+    if nfc_uid:
+        try:
+            db.enroll_credential(
+                user_id=user.id,
+                credential_type="nfc",
+                identifier=nfc_uid,
+            )
+        except Exception:
+            pass
+
+    try:
+        db.log_audit(
+            actor="admin",
+            action="enrol_user",
+            entity_type="user",
+            entity_id=str(user.id),
+            after=user.name,
+        )
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "status": "ok",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "photo": user.photo,
+        }
+    })
+
+
 @app.get("/api/time")
 def api_get_time() -> JSONResponse:
     now = datetime.now()
@@ -325,8 +423,10 @@ def admin_panel(request: Request) -> RedirectResponse | None:
 
 
 @ui.page("/enrollment", title="LabAuth \u2013 Enrollment", dark=None, favicon=FAVICON_PATH)
+@ui.page("/enrollment", title="LabAuth – Enrollment", dark=None, favicon=FAVICON_PATH)
 def enrollment_page(request: Request) -> RedirectResponse | None:
     """Enrollment route that authenticates whether the admin login session is still active or not."""
+    """Sequential Swiss-style enrollment workflow bound by SBB Lyne guidelines."""
     if not request_has_valid_admin_session(request):
         return RedirectResponse("/admin-display")
     ui.add_head_html("""
@@ -356,6 +456,7 @@ def enrollment_page(request: Request) -> RedirectResponse | None:
             </sbb-container>
         </main>
     """, sanitize=False)
+    build_enrolment_page()
     return None
 
 

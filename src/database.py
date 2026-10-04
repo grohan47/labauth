@@ -78,6 +78,8 @@ _SCHEMA = (
         plaksha_id  TEXT,
         name        TEXT NOT NULL,
         photo       TEXT NOT NULL DEFAULT '/static/portraits/default.svg',
+        email       TEXT,
+        phone       TEXT,
         is_temp     INTEGER NOT NULL DEFAULT 0 CHECK (is_temp IN (0, 1)),
         status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
         created_at  TEXT NOT NULL,
@@ -295,6 +297,12 @@ def init_db() -> None:
         db.execute("PRAGMA journal_mode = WAL")
         for statement in _SCHEMA:
             db.execute(statement)
+        cols = [r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()]
+        if cols:
+            if "email" not in cols:
+                db.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            if "phone" not in cols:
+                db.execute("ALTER TABLE users ADD COLUMN phone TEXT")
     seed_default_access_areas()
 
 
@@ -314,6 +322,7 @@ def seed_default_access_areas() -> None:
 
 
 def _user_from_row(row: sqlite3.Row) -> User:
+    keys = row.keys()
     return User(
         id=row["id"],
         name=row["name"],
@@ -323,6 +332,8 @@ def _user_from_row(row: sqlite3.Row) -> User:
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        email=row["email"] if "email" in keys else None,
+        phone=row["phone"] if "phone" in keys else None,
     )
 
 
@@ -488,6 +499,8 @@ def create_user(
     *,
     plaksha_id: Optional[str] = None,
     photo: str = DEFAULT_PHOTO,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
     is_temp: bool = False,
     status: str = "active",
 ) -> User:
@@ -495,10 +508,20 @@ def create_user(
     with get_db() as db:
         cur = db.execute(
             """
-            INSERT INTO users (plaksha_id, name, photo, is_temp, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (plaksha_id, name, photo, email, phone, is_temp, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (_clean(plaksha_id), name.strip(), photo or DEFAULT_PHOTO, int(bool(is_temp)), status, now, now),
+            (
+                _clean(plaksha_id),
+                name.strip(),
+                photo or DEFAULT_PHOTO,
+                _clean(email),
+                _clean(phone),
+                int(bool(is_temp)),
+                status,
+                now,
+                now,
+            ),
         )
         user_id = cur.lastrowid
     user = get_user(user_id)
