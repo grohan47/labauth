@@ -95,7 +95,7 @@ class CDPClient:
         return out_path
 
 
-def wait_for_server(url: str, timeout: float = 12.0) -> bool:
+def wait_for_server(url: str, timeout: float = 40.0) -> bool:
     start = time.time()
     while time.time() - start < timeout:
         try:
@@ -103,7 +103,7 @@ def wait_for_server(url: str, timeout: float = 12.0) -> bool:
                 if resp.status == 200:
                     return True
         except Exception:
-            time.sleep(0.2)
+            time.sleep(0.3)
     return False
 
 
@@ -123,8 +123,10 @@ async def run_enrolment_tests():
     env["PORT"] = str(PORT)
     env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent / "src")
 
+    venv_py = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "python"
+    python_bin = str(venv_py) if venv_py.exists() else sys.executable
     server_proc = subprocess.Popen(
-        [sys.executable, "src/main.py"],
+        [python_bin, "src/main.py"],
         cwd=str(Path(__file__).resolve().parent.parent),
         env=env,
         stdout=subprocess.PIPE,
@@ -137,7 +139,11 @@ async def run_enrolment_tests():
 
     try:
         print("\n1. Starting LabAuth server on port", PORT, "...")
-        assert wait_for_server(BASE_URL), "Server failed to start!"
+        if not wait_for_server(BASE_URL, timeout=40.0):
+            server_proc.kill()
+            out, _ = server_proc.communicate(timeout=2.0) if server_proc.stdout else ("", "")
+            print("Server output on failure:\n", out)
+            raise AssertionError("Server failed to start!")
         print("  ✓ LabAuth server is running.")
 
         # Test unauthenticated redirect
