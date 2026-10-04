@@ -42,6 +42,9 @@ from models import (
 
 DEFAULT_PHOTO = "/static/portraits/default.svg"
 
+#: Key under which the display's active alert message is persisted.
+SETTING_DISPLAY_ALERT = "display_alert"
+
 #: Canonical, pre-defined access areas. Insert-only seed; never overwritten.
 DEFAULT_ACCESS_AREAS: tuple[tuple[str, str, int], ...] = (
     ("indoor_lab", "Indoor lab", 10),
@@ -67,6 +70,7 @@ BACKUP_TABLE_ORDER: tuple[str, ...] = (
     "presence_log",
     "credential_attempts",
     "admin_audit_log",
+    "settings",
     "backup_runs",
     "current_presence",
 )
@@ -171,6 +175,13 @@ _SCHEMA = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_audit_time ON admin_audit_log (occurred_at)",
+    """
+    CREATE TABLE IF NOT EXISTS settings (
+        key         TEXT PRIMARY KEY,
+        value       TEXT,
+        updated_at  TEXT NOT NULL
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS backup_runs (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -608,6 +619,114 @@ def delete_user(user_id: int) -> bool:
 def count_users() -> int:
     with get_db() as db:
         return int(db.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+
+def list_users_detailed(
+    *, include_inactive: bool = True, include_temp: bool = True, limit: int = 200
+) -> list[dict]:
+    """Users with their granted areas, live presence and ban state."""
+    clauses, params = [], []
+    if not include_inactive:
+        clauses.append("status = 'active'")
+    if not include_temp:
+        clauses.append("is_temp = 0")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT u.*,
+                   EXISTS (SELECT 1 FROM current_presence cp WHERE cp.user_id = u.id) AS is_inside,
+                   EXISTS (SELECT 1 FROM bans b WHERE b.user_id = u.id AND b.unbanned_at IS NULL) AS is_banned
+            FROM users u
+            {where}
+            ORDER BY u.name COLLATE NOCASE ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [_user_detail(conn, row) for row in rows]
+
+
+def search_users_detailed(query: str, *, limit: int = 50) -> list[dict]:
+    """Search users by name or Plaksha ID, returning full detail rows."""
+    term = (query or "").strip()
+    if not term:
+        return list_users_detailed(limit=limit)
+    like = f"%{term}%"
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.*,
+                   EXISTS (SELECT 1 FROM current_presence cp WHERE cp.user_id = u.id) AS is_inside,
+                   EXISTS (SELECT 1 FROM bans b WHERE b.user_id = u.id AND b.unbanned_at IS NULL) AS is_banned
+            FROM users u
+            WHERE status = 'active'
+              AND (name LIKE ? COLLATE NOCASE OR plaksha_id LIKE ? COLLATE NOCASE)
+            ORDER BY u.name COLLATE NOCASE ASC
+            LIMIT ?
+            """,
+            (like, like, limit),
+        ).fetchall()
+        return [_user_detail(conn, row) for row in rows]
+
+
+def _user_detail(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "plaksha_id": row["plaksha_id"],
+        "photo": row["photo"],
+        "is_temp": bool(row["is_temp"]),
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "access": _labels_for(conn, row["id"]),
+        "is_inside": bool(row["is_inside"]),
+        "is_banned": bool(row["is_banned"]),
+    }
+
+
+def list_presence_log(*, limit: int = 100, user_id: Optional[int] = None) -> list[dict]:
+    """The in/out log joined with the acting user, newest first."""
+    params: list[Any] = []
+    where = ""
+    if user_id is not None:
+        where = "WHERE p.user_id = ?"
+        params.append(user_id)
+    params.append(limit)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT p.id, p.event_type, p.entry_method, p.occurred_at, p.device_id,
+                   u.id AS user_id, u.name AS user_name, u.is_temp AS user_is_temp
+            FROM presence_log p
+            JOIN users u ON u.id = p.user_id
+            {where}
+            ORDER BY p.occurred_at DESC, p.id DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "user_name": row["user_name"],
+            "is_temp": bool(row["user_is_temp"]),
+            "event_type": row["event_type"],
+            "entry_method": row["entry_method"],
+            "occurred_at": row["occurred_at"],
+            "device_id": row["device_id"],
+        }
+        for row in rows
+    ]
+
+
+def clear_all_data() -> None:
+    """Delete every row from every table, keeping the schema intact."""
+    with get_db() as conn:
+        for table in reversed(BACKUP_TABLE_ORDER):
+            conn.execute(f"DELETE FROM {table}")
 
 
 def set_user_access_areas(
@@ -1139,6 +1258,38 @@ def list_backup_runs(*, limit: int = 20) -> list[BackupRun]:
 def latest_backup_run() -> Optional[BackupRun]:
     runs = list_backup_runs(limit=1)
     return runs[0] if runs else None
+
+
+# ---------------------------------------------------------------------------
+# Settings (persisted display configuration)
+# ---------------------------------------------------------------------------
+
+
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    with get_db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    if row is None or row["value"] is None:
+        return default
+    return row["value"]
+
+
+def set_setting(key: str, value: Optional[str]) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT (key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value, utcnow_iso()),
+        )
+
+
+def all_settings() -> dict[str, Optional[str]]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT key, value FROM settings ORDER BY key").fetchall()
+    return {row["key"]: row["value"] for row in rows}
 
 
 # ---------------------------------------------------------------------------

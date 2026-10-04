@@ -2,7 +2,7 @@
 
 This directory contains test scripts to test and verify the **LabAuth** presence display in real time:
 1. **`test_time.py`**: Test specifying arbitrary times and dates, verifying analogue clock hands, digital readout, multilingual greetings, and automatic Light/Dark mode transitions.
-2. **`test_users.py`**: Add, remove, list, reset, and populate lab occupants, observing live UI reactivity, card scaling (1 to 12 occupants), and 2-row carousel transitions (13+ occupants).
+2. **`test_users.py`**: Add, remove, list, empty, and populate lab occupants, observing live UI reactivity, card scaling (1 to 12 occupants), and 2-row carousel transitions (13+ occupants).
 
 ---
 
@@ -99,10 +99,12 @@ uv run python tests/test_users.py remove "Elena Rossi"
 uv run python tests/test_users.py list
 ```
 
-#### Reset Occupants to Default State
-Resets the lab to the initial 3 occupants (Aisha Khan, Rohan Gupta, Meera Nair):
+#### Empty the Lab
+
+Empties the lab (checks everyone out). Nothing is invented and no demo users are created:
+
 ```bash
-uv run python tests/test_users.py reset
+uv run python tests/test_users.py empty
 ```
 
 #### Populate Exact Occupant Counts (Layout Testing)

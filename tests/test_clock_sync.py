@@ -13,53 +13,20 @@ and the cards stay correct, using the Chrome DevTools Protocol.
 import asyncio
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
-import urllib.error
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import websockets  # noqa: E402
+from cdp import Browser, wait_for  # noqa: E402
 
 PORT = int(os.environ.get("PORT", 8130))
-CDP_PORT = 9270
 BASE_URL = f"http://127.0.0.1:{PORT}"
 DISPLAY_URL = f"{BASE_URL}/display?reload=5"  # the legacy reload param must now be inert
-
-
-class CDPClient:
-    def __init__(self, ws_url: str):
-        self.ws_url = ws_url
-        self.ws = None
-        self._msg_id = 0
-
-    async def connect(self):
-        self.ws = await websockets.connect(self.ws_url, max_size=None)
-
-    async def close(self):
-        if self.ws:
-            await self.ws.close()
-
-    async def send_command(self, method: str, params: dict | None = None):
-        self._msg_id += 1
-        await self.ws.send(json.dumps({"id": self._msg_id, "method": method, "params": params or {}}))
-        while True:
-            data = json.loads(await self.ws.recv())
-            if data.get("id") == self._msg_id:
-                return data.get("result", {})
-
-    async def evaluate(self, expression: str):
-        res = await self.send_command(
-            "Runtime.evaluate",
-            {"expression": expression, "returnByValue": True, "awaitPromise": True},
-        )
-        value = res.get("result", {})
-        return value["value"] if "value" in value else res
 
 
 def _get(path: str) -> dict:
@@ -79,49 +46,17 @@ def _post(path: str, payload: dict) -> dict:
 
 
 async def run_checks() -> None:
-    browser_bin = (
-        shutil.which("brave-browser")
-        or shutil.which("chromium")
-        or shutil.which("google-chrome")
-        or shutil.which("chromium-browser")
-    )
-    assert browser_bin, "Chromium-based browser not found!"
-
-    proc = subprocess.Popen(
-        [
-            browser_bin,
-            "--headless=new",
-            "--disable-gpu",
-            "--window-size=1440,900",
-            f"--remote-debugging-port={CDP_PORT}",
-            DISPLAY_URL,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(2)
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json/list", timeout=5) as r:
-            targets = json.loads(r.read().decode("utf-8"))
-        target = next((t for t in targets if t.get("type") == "page"), None)
-        assert target, "No browser page target found!"
-
-        client = CDPClient(target["webSocketDebuggerUrl"])
-        await client.connect()
+    with Browser(DISPLAY_URL) as browser:
+        client = await browser.page()
 
         print("\n[Step 1] Waiting for the display to bind...")
-        await client.evaluate("""
-            new Promise((resolve) => {
-                const check = () => {
-                    if (document.querySelector('#digital-time') &&
-                        document.querySelector('.clock-stack sbb-clock') &&
-                        document.querySelector('.presence-content-wrapper')) {
-                        resolve(true);
-                    } else { setTimeout(check, 100); }
-                };
-                check();
-            })
-        """)
+        bound = await wait_for(
+            client,
+            "Boolean(document.querySelector('#digital-time') && "
+            "document.querySelector('.clock-stack sbb-clock') && "
+            "document.querySelector('.presence-content-wrapper'))",
+        )
+        assert bound, "Display never bound its elements"
         marker = "labauth-no-reload-marker"
         await client.evaluate(f"window.__labauthMarker = '{marker}'")
 
@@ -305,12 +240,6 @@ async def run_checks() -> None:
         print("  ✓ Reset clears 'now'; analogue face is back on the onboard clock.")
 
         await client.close()
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except Exception:
-            proc.kill()
 
 
 def main() -> int:
