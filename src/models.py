@@ -32,6 +32,8 @@ class User:
     status: str
     created_at: str
     updated_at: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
 
 
 @dataclass(frozen=True)
