@@ -49,6 +49,10 @@ SETTING_DISPLAY_ALERT = "display_alert"
 DEFAULT_ACCESS_AREAS: tuple[tuple[str, str, int], ...] = (
     ("indoor_lab", "Indoor lab", 10),
     ("tool_area", "Tool area", 20),
+    ("three_d_printers", "3D printers", 30),
+    ("laser_cutter", "Laser cutter", 40),
+    ("cnc_mill", "CNC mill", 50),
+    ("soldering_bench", "Soldering bench", 60),
 )
 
 #: Human spellings accepted from the API / tooling, resolved to a stable code.
@@ -58,6 +62,15 @@ ACCESS_AREA_ALIASES: dict[str, str] = {
     "lab interior": "indoor_lab",
     "tool_area": "tool_area",
     "tool area": "tool_area",
+    "three_d_printers": "three_d_printers",
+    "3d printers": "three_d_printers",
+    "3d_printers": "three_d_printers",
+    "laser_cutter": "laser_cutter",
+    "laser cutter": "laser_cutter",
+    "cnc_mill": "cnc_mill",
+    "cnc mill": "cnc_mill",
+    "soldering_bench": "soldering_bench",
+    "soldering bench": "soldering_bench",
 }
 
 #: Table load order for full backups (respects foreign-key dependencies).

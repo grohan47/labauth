@@ -33,6 +33,7 @@ import http.cookiejar
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -43,8 +44,10 @@ from pathlib import Path
 
 import websockets
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cdp import find_browser, free_port
+
 PORT = 8150
-CDP_PORT = 9270
 BASE_URL = f"http://127.0.0.1:{PORT}"
 ARTIFACT_DIR = Path("/home/rgcodes/.gemini/antigravity/brain/f50762c6-60a7-4308-a02a-a09d87e87cec")
 
@@ -186,23 +189,29 @@ async def run_enrolment_tests():
 
         # Launch Chromium headless with CDP
         print("\n4. Launching Chromium headless browser for UI verification...")
+        cdp_port = free_port()
         chrome_cmd = [
-            "/usr/bin/chromium-browser",
+            find_browser(),
             "--headless=new",
             "--disable-gpu",
             "--no-sandbox",
-            f"--remote-debugging-port={CDP_PORT}",
+            f"--remote-debugging-port={cdp_port}",
             f"--user-data-dir={chrome_data_dir}",
-            "--window-size=1280,960",
+            "--window-size=1440,960",
             f"{BASE_URL}/admin-display",
         ]
-        chrome_proc = subprocess.Popen(chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        chrome_proc = subprocess.Popen(
+            chrome_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
         # Get WebSocket debugger URL with retry polling
         targets = None
         for _ in range(40):
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json", timeout=1.0) as resp:
+                with urllib.request.urlopen(f"http://127.0.0.1:{cdp_port}/json/list", timeout=1.0) as resp:
                     targets = json.loads(resp.read().decode("utf-8"))
                     if targets:
                         break

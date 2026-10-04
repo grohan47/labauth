@@ -230,6 +230,19 @@ async def api_post_alerts(request: Request) -> JSONResponse:
     })
 
 
+@app.get("/api/access-areas")
+def api_list_access_areas() -> JSONResponse:
+    db.init_db()
+    areas = db.list_access_areas()
+    return JSONResponse({
+        "status": "ok",
+        "access_areas": [
+            {"id": a.id, "code": a.code, "label": a.label, "sort_order": a.sort_order}
+            for a in areas
+        ],
+    })
+
+
 @app.post("/api/enrolment/complete")
 async def api_enrolment_complete(request: Request) -> JSONResponse:
     if not request_has_valid_admin_session(request):
@@ -263,7 +276,8 @@ async def api_enrolment_complete(request: Request) -> JSONResponse:
     plaksha_id = (data.get("plaksha_id") or "").strip() or None
     phone = (data.get("phone") or "").strip() or None
     email = (data.get("email") or "").strip() or None
-    access_areas = data.get("access") or ["Indoor lab"]
+    is_temp = bool(data.get("is_temp", False))
+    access_areas = data.get("access") or []
 
     db.init_db()
 
@@ -274,6 +288,7 @@ async def api_enrolment_complete(request: Request) -> JSONResponse:
             photo=photo_path,
             email=email,
             phone=phone,
+            is_temp=is_temp,
             status="active",
         )
     except Exception as err:
@@ -281,9 +296,9 @@ async def api_enrolment_complete(request: Request) -> JSONResponse:
 
     if access_areas:
         try:
-            db.set_user_access_areas(user.id, access_areas, granted_by="admin")
-        except Exception:
-            pass
+            db.set_user_access_areas(user.id, access_areas, granted_by="admin", allow_create=False)
+        except Exception as err:
+            logger.warning("Failed to set access areas for user %s: %s", user.id, err)
 
     if data.get("fingerprint_enrolled"):
         try:
@@ -323,6 +338,7 @@ async def api_enrolment_complete(request: Request) -> JSONResponse:
             "id": user.id,
             "name": user.name,
             "photo": user.photo,
+            "is_temp": user.is_temp,
         }
     })
 
@@ -422,40 +438,11 @@ def admin_panel(request: Request) -> RedirectResponse | None:
     return None
 
 
-@ui.page("/enrollment", title="LabAuth \u2013 Enrollment", dark=None, favicon=FAVICON_PATH)
 @ui.page("/enrollment", title="LabAuth – Enrollment", dark=None, favicon=FAVICON_PATH)
 def enrollment_page(request: Request) -> RedirectResponse | None:
-    """Enrollment route that authenticates whether the admin login session is still active or not."""
     """Sequential Swiss-style enrollment workflow bound by SBB Lyne guidelines."""
     if not request_has_valid_admin_session(request):
         return RedirectResponse("/admin-display")
-    ui.add_head_html("""
-        <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-        <link rel="stylesheet" href="/static/vendor/sbb-variables.css">
-        <link rel="stylesheet" href="/static/vendor/standard-theme.css">
-        <link rel="stylesheet" href="/static/display.css?v=35">
-        <script type="module" src="/static/vendor/sbb-elements.bundle.js"></script>
-    """)
-    ui.html("""
-        <main class="admin-panel">
-            <sbb-container color="transparent" class="admin-panel-shell">
-                <header class="admin-header">
-                    <h1 class="admin-heading">Enrollment.</h1>
-                    <div class="admin-header-controls">
-                        <sbb-secondary-button href="/admin" size="m" aria-label="Return to administration">
-                            Admin
-                        </sbb-secondary-button>
-                    </div>
-                </header>
-                <div style="margin-block-start: var(--sbb-spacing-responsive-l);">
-                    <sbb-title level="2" visual-level="3">Step 1: Identity</sbb-title>
-                    <p style="color: var(--display-muted); margin-block-start: var(--sbb-spacing-fixed-2x);">
-                        Session active. Sequential enrollment workflow begins here.
-                    </p>
-                </div>
-            </sbb-container>
-        </main>
-    """, sanitize=False)
     build_enrolment_page()
     return None
 

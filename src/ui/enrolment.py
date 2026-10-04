@@ -9,7 +9,10 @@ Full-screen multi-step enrolment workflow:
 
 from __future__ import annotations
 
+import html
+
 from nicegui import ui
+import database as db
 from ui.display import _color_scheme
 
 
@@ -47,6 +50,20 @@ globalThis.sbbConfig.icon.interceptor = function(context) {
 def build_enrolment_page() -> None:
     """Render the full Swiss-design Enrolment Flow under /enrollment."""
     current_theme = _color_scheme()
+    db.init_db()
+    areas = db.list_access_areas()
+    if not areas:
+        db.seed_default_access_areas()
+        areas = db.list_access_areas()
+
+    checkbox_items = []
+    for area in areas:
+        checked_attr = " checked" if area.code in ("indoor_lab", "tool_area") else ""
+        escaped_label = html.escape(area.label)
+        checkbox_items.append(
+            f'<sbb-checkbox name="access" value="{escaped_label}"{checked_attr}>{escaped_label}</sbb-checkbox>'
+        )
+    access_checkboxes_html = "\\n                        ".join(checkbox_items)
 
     ui.add_head_html(f"""
         <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
@@ -131,6 +148,9 @@ def build_enrolment_page() -> None:
                             <label for="input-email">Email Address (Optional)</label>
                             <input id="input-email" type="email" placeholder="e.g. maya.patel@plaksha.edu.in" autocomplete="off">
                         </sbb-form-field>
+                        <div style="grid-column: 1 / -1; margin-top: 0.25rem;">
+                            <sbb-checkbox id="input-is-temp" name="is_temp">Temporary Access (Visitor / Guest)</sbb-checkbox>
+                        </div>
                     </div>
 
                     <div class="enrolment-section-divider"></div>
@@ -138,12 +158,7 @@ def build_enrolment_page() -> None:
                     <!-- Authorised workspaces checkbox area -->
                     <span class="enrolment-section-label">Authorised Workspaces (Optional)</span>
                     <div class="enrolment-checkboxes-grid" id="access-checkbox-group">
-                        <sbb-checkbox name="access" value="Indoor lab" checked>Indoor lab</sbb-checkbox>
-                        <sbb-checkbox name="access" value="Tool area" checked>Tool area</sbb-checkbox>
-                        <sbb-checkbox name="access" value="3D printers">3D printers</sbb-checkbox>
-                        <sbb-checkbox name="access" value="Laser cutter">Laser cutter</sbb-checkbox>
-                        <sbb-checkbox name="access" value="CNC mill">CNC mill</sbb-checkbox>
-                        <sbb-checkbox name="access" value="Soldering bench">Soldering bench</sbb-checkbox>
+                        {access_checkboxes_html}
                     </div>
                 </div>
 
@@ -316,6 +331,10 @@ def build_enrolment_page() -> None:
                             <span class="demo-label">Status:</span>
                             <span class="demo-val" style="color: #27ae60;">Active</span>
                         </div>
+                        <div class="demo-item">
+                            <span class="demo-label">Type:</span>
+                            <span id="final-demo-temp" class="demo-val">Permanent Member</span>
+                        </div>
                     </div>
                 </div>
 
@@ -428,7 +447,8 @@ def build_enrolment_page() -> None:
                 plakshaId: '',
                 phone: '',
                 email: '',
-                access: ['Indoor lab', 'Tool area'],
+                isTemp: false,
+                access: [],
                 fpEnrolled: false,
                 fpVerified: false,
                 nfcUid: null,
@@ -450,6 +470,7 @@ def build_enrolment_page() -> None:
             const inputPlakshaId = document.querySelector('#input-plaksha-id');
             const inputPhone = document.querySelector('#input-phone');
             const inputEmail = document.querySelector('#input-email');
+            const inputIsTemp = document.querySelector('#input-is-temp');
             const accessCheckboxes = document.querySelectorAll('sbb-checkbox[name="access"]');
 
             const mockAvatar = document.querySelector('#mock-card-avatar');
@@ -504,6 +525,7 @@ def build_enrolment_page() -> None:
         const finalDemoId = document.querySelector('#final-demo-id');
         const finalDemoPhone = document.querySelector('#final-demo-phone');
         const finalDemoEmail = document.querySelector('#final-demo-email');
+        const finalDemoTemp = document.querySelector('#final-demo-temp');
         const successDesc = document.querySelector('#success-desc');
 
         // --- STEP SWITCHER ---
@@ -690,9 +712,10 @@ def build_enrolment_page() -> None:
                 state.plakshaId = (inputPlakshaId.value || '').trim();
                 state.phone = (inputPhone.value || '').trim();
                 state.email = (inputEmail.value || '').trim();
+                state.isTemp = Boolean(inputIsTemp && inputIsTemp.checked);
 
                 const selectedAccess = [];
-                accessCheckboxes.forEach(cb => {
+                document.querySelectorAll('sbb-checkbox[name="access"]').forEach(cb => {
                     if (cb.checked) selectedAccess.push(cb.value);
                 });
                 state.access = selectedAccess;
@@ -796,6 +819,12 @@ def build_enrolment_page() -> None:
 
                 // Populate chips
                 finalCardChips.innerHTML = '';
+                if (state.isTemp) {
+                    const tempChip = document.createElement('sbb-chip-label');
+                    tempChip.setAttribute('size', 's');
+                    tempChip.textContent = 'Guest / Temporary';
+                    finalCardChips.appendChild(tempChip);
+                }
                 if (state.access && state.access.length > 0) {
                     state.access.forEach(area => {
                         const chip = document.createElement('sbb-chip-label');
@@ -803,7 +832,7 @@ def build_enrolment_page() -> None:
                         chip.textContent = area;
                         finalCardChips.appendChild(chip);
                     });
-                } else {
+                } else if (!state.isTemp) {
                     const chip = document.createElement('sbb-chip-label');
                     chip.setAttribute('size', 's');
                     chip.textContent = 'Lab Interior';
@@ -831,6 +860,9 @@ def build_enrolment_page() -> None:
                 finalDemoId.textContent = state.plakshaId || 'Not provided';
                 finalDemoPhone.textContent = state.phone || 'Not provided';
                 finalDemoEmail.textContent = state.email || 'Not provided';
+                if (finalDemoTemp) {
+                    finalDemoTemp.textContent = state.isTemp ? 'Temporary Access (Visitor / Guest)' : 'Standard / Permanent Member';
+                }
 
                 setStep(4);
             });
@@ -853,6 +885,7 @@ def build_enrolment_page() -> None:
                         plaksha_id: state.plakshaId || null,
                         phone: state.phone || null,
                         email: state.email || null,
+                        is_temp: Boolean(state.isTemp),
                         access: state.access,
                         fingerprint_enrolled: state.fpVerified || state.fpEnrolled,
                         nfc_uid: state.nfcUid
@@ -890,8 +923,10 @@ def build_enrolment_page() -> None:
                 inputPlakshaId.value = '';
                 inputPhone.value = '';
                 inputEmail.value = '';
+                if (inputIsTemp) inputIsTemp.checked = false;
                 mockAvatar.src = '/static/portraits/default.svg';
                 state.photo = '/static/portraits/default.svg';
+                state.isTemp = false;
                 state.fpEnrolled = false;
                 state.fpVerified = false;
                 state.nfcUid = null;
