@@ -197,11 +197,18 @@ async def run_enrolment_tests():
             f"{BASE_URL}/admin-display",
         ]
         chrome_proc = subprocess.Popen(chrome_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1.5)
 
-        # Get WebSocket debugger URL
-        with urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json") as resp:
-            targets = json.loads(resp.read().decode("utf-8"))
+        # Get WebSocket debugger URL with retry polling
+        targets = None
+        for _ in range(40):
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json", timeout=1.0) as resp:
+                    targets = json.loads(resp.read().decode("utf-8"))
+                    if targets:
+                        break
+            except Exception:
+                time.sleep(0.3)
+        assert targets, "Failed to connect to Chromium CDP endpoint!"
         page_target = next(t for t in targets if t.get("type") == "page")
         ws_url = page_target["webSocketDebuggerUrl"]
 
