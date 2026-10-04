@@ -92,20 +92,21 @@ DEFAULT_PEOPLE = (
 
 
 class PresenceStore:
+    """DB-backed presence state.
+
+    Nothing is ever inserted automatically: a fresh database starts with no
+    users and an empty lab. Demo data is only ever created by an explicit
+    ``populate()`` call from the developer tooling.
+    """
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._listeners: list[Callable[..., None]] = []
         self._mock_time: str | None = None
         self._mock_date: str | None = None
-        self._alert: str | None = None
         db.init_db()
-        self._seed_if_empty()
-
-    # -- seeding -----------------------------------------------------------
-
-    def _seed_if_empty(self) -> None:
-        if db.count_users() == 0 and db.count_presence() == 0:
-            self.reset()
+        # The active alert is persisted; memory is only a cache of it.
+        self._alert = db.get_setting(db.SETTING_DISPLAY_ALERT)
 
     # -- helpers -----------------------------------------------------------
 
@@ -255,14 +256,13 @@ class PresenceStore:
         return True, person, out_display
 
     def reset(self) -> None:
+        """Empty the lab.
+
+        Deliberately invents no occupants: users only ever enter the database
+        through a real check-in, an explicit ``populate()`` call, or enrollment.
+        """
         with self._lock:
             db.clear_current_presence()
-            for person in DEFAULT_PEOPLE:
-                user = db.get_active_user_by_name(person.name)
-                if user is None:
-                    user = db.create_user(person.name, photo=person.photo)
-                db.set_user_access_areas(user.id, person.access, allow_create=True)
-                db.upsert_current_presence(user.id, db.local_hhmm_to_iso(person.checked_in))
         self._notify()
 
     def set_people(self, people: Iterable[PersonInside]) -> None:
@@ -349,9 +349,12 @@ class PresenceStore:
         return self._mock_date
 
     def set_alert(self, text: str | None) -> None:
+        cleaned = text.strip() if text and text.strip() else None
         with self._lock:
-            self._alert = text.strip() if text and text.strip() else None
-        self._notify({"type": "alert", "alert": self._alert})
+            self._alert = cleaned
+            # Persisted so the display message survives a restart.
+            db.set_setting(db.SETTING_DISPLAY_ALERT, cleaned)
+        self._notify({"type": "alert", "alert": cleaned})
 
     def get_alert(self) -> str | None:
         with self._lock:

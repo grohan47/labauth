@@ -117,8 +117,23 @@ erDiagram
 | `presence_log` | The immutable in/out log; the authoritative record of real check-in/check-out events. |
 | `credential_attempts` | Every authentication attempt, successful or not, with the raw reader message preserved in `message`. |
 | `admin_audit_log` | Consequential admin actions (user added/deleted, display settings changed, bans, etc.) with optional before/after snapshots. |
+| `settings` | Persisted display configuration, e.g. the active alert message under `display_alert`. |
 | `backup_runs` | Outcome of every backup attempt (status, destination, size, error). |
 | `current_presence` | Realtime cache of who is inside, used by the display. Rebuildable from `presence_log`. |
+
+### No automatic seeding
+
+A new database is created **empty**: no demo users and an empty lab. Users only
+ever enter the database through a real check-in, the explicit developer
+`populate()` tooling, or enrollment. The pre-defined `access_areas` rows are
+seeded because they are configuration rather than demo data.
+
+This means the database persists across restarts — what you see is what is
+actually stored. To start over, delete the database file:
+
+```bash
+rm -f data/labauth.db data/labauth.db-wal data/labauth.db-shm
+```
 
 ### Design notes
 

@@ -240,7 +240,7 @@ def list_users(base_url: str = DEFAULT_BASE_URL) -> list[dict]:
 
 
 def reset_users(base_url: str = DEFAULT_BASE_URL) -> dict:
-    """Reset occupants back to the default 3 people."""
+    """Empty the lab (check everyone out). No demo users are created."""
     url = f"{base_url.rstrip('/')}/api/presence/reset"
     return _post_json(url, {})
 
@@ -480,7 +480,7 @@ def main() -> None:
 
     elif args.command == "reset":
         res = reset_users(base_url=base_url)
-        print(f"✓ Reset presence back to default occupants. Total occupants: {res.get('total_count')}")
+        print(f"✓ Emptied the lab. Total occupants: {res.get('total_count')}")
 
     elif args.command == "populate":
         res = populate_users(args.count, base_url=base_url)

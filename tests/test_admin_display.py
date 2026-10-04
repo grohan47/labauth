@@ -13,61 +13,22 @@ Verifies:
 """
 
 import asyncio
-import base64
 import json
 import os
-import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import urllib.error
-import websockets
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cdp import Browser, CDPClient, wait_for  # noqa: E402
 
 PORT = 8110
-CDP_PORT = 9250
 BASE_URL = f"http://127.0.0.1:{PORT}"
-
-
-class CDPClient:
-    def __init__(self, ws_url: str):
-        self.ws_url = ws_url
-        self.ws = None
-        self._msg_id = 0
-
-    async def connect(self):
-        self.ws = await websockets.connect(self.ws_url)
-
-    async def close(self):
-        if self.ws:
-            await self.ws.close()
-
-    async def send_command(self, method: str, params: dict | None = None):
-        self._msg_id += 1
-        msg = {"id": self._msg_id, "method": method, "params": params or {}}
-        await self.ws.send(json.dumps(msg))
-        while True:
-            raw = await self.ws.recv()
-            data = json.loads(raw)
-            if data.get("id") == self._msg_id:
-                return data.get("result", {})
-
-    async def evaluate(self, expression: str):
-        res = await self.send_command(
-            "Runtime.evaluate",
-            {"expression": expression, "returnByValue": True, "awaitPromise": True},
-        )
-        val = res.get("result", {})
-        if "value" in val:
-            return val["value"]
-        return res
-
-    async def screenshot(self, path: str):
-        res = await self.send_command("Page.captureScreenshot", {"format": "png"})
-        data = base64.b64decode(res["data"])
-        with open(path, "wb") as f:
-            f.write(data)
-        print(f"  ✓ Saved screenshot: {path}")
 
 
 def test_api_login():
@@ -123,48 +84,16 @@ def test_favicon_endpoints():
 
 async def test_browser_admin_display():
     print("\n[Test 2] Launching headless browser to test /admin-display...")
-    browser_bin = (
-        shutil.which("brave-browser")
-        or shutil.which("chromium")
-        or shutil.which("google-chrome")
-        or shutil.which("chromium-browser")
-    )
-    assert browser_bin, "Chromium-based browser not found!"
-
-    cmd = [
-        browser_bin,
-        "--headless=new",
-        "--disable-gpu",
-        "--window-size=1280,800",
-        f"--remote-debugging-port={CDP_PORT}",
-        f"{BASE_URL}/admin-display",
-    ]
-    browser_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
-
-    try:
-        req = urllib.request.Request(f"http://127.0.0.1:{CDP_PORT}/json/list")
-        with urllib.request.urlopen(req, timeout=5) as r:
-            targets = json.loads(r.read().decode("utf-8"))
-        target = next((t for t in targets if "admin-display" in t.get("url", "") or t.get("type") == "page"), None)
-        assert target, "Browser page target for admin-display not found!"
-
-        client = CDPClient(target["webSocketDebuggerUrl"])
-        await client.connect()
+    with Browser(f"{BASE_URL}/admin-display", width=1280, height=800) as browser:
+        client = await browser.page()
 
         # Step 2a: Wait for DOM to load
-        await client.evaluate("""
-            new Promise((resolve) => {
-                const check = () => {
-                    if (document.querySelector('.admin-titlebar') && document.querySelector('#admin-access-button')) {
-                        resolve(true);
-                    } else {
-                        setTimeout(check, 100);
-                    }
-                };
-                check();
-            })
-        """)
+        bound = await wait_for(
+            client,
+            "Boolean(document.querySelector('.admin-titlebar') && "
+            "document.querySelector('#admin-access-button'))",
+        )
+        assert bound, "Admin titlebar and controls never appeared"
         print("  ✓ Admin titlebar and controls successfully loaded.")
 
         # Step 2b: Verify titlebar layout, typography & cut SVG logo
@@ -357,14 +286,13 @@ async def test_browser_admin_display():
         print("  ✓ Escape key successfully dismisses the dialog.")
 
         await client.close()
-    finally:
-        browser_proc.terminate()
 
 
 def main():
+    tmp = tempfile.mkdtemp(prefix="labauth-admin-display-")
     server_proc = subprocess.Popen(
         [sys.executable, "src/main.py"],
-        env=dict(os.environ, PORT=str(PORT)),
+        env=dict(os.environ, PORT=str(PORT), LABAUTH_DB_PATH=str(Path(tmp) / "labauth.db")),
     )
     time.sleep(2)
     try:

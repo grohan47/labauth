@@ -55,15 +55,24 @@ def test_schema_and_seed():
     assert {"indoor_lab", "tool_area"} <= codes, f"Access areas not seeded: {codes}"
 
 
-def test_seed_presence_has_three_occupants():
-    people = presence.store.get_people()
-    names = {person.name for person in people}
-    assert names == {"Aisha Khan", "Rohan Gupta", "Meera Nair"}, names
-    assert all(person.user_id is not None for person in people)
-    # Canonical access areas only.
-    for person in people:
-        for area in person.access:
-            assert area in {"Indoor lab", "Tool area"}, area
+def test_fresh_database_is_empty():
+    """Nothing is seeded automatically: a new database starts with no users."""
+    original = os.environ["LABAUTH_DB_PATH"]
+    fresh = Path(tempfile.mkdtemp(prefix="labauth-fresh-")) / "fresh.db"
+    os.environ["LABAUTH_DB_PATH"] = str(fresh)
+    try:
+        db.init_db()
+        assert db.count_users() == 0, db.list_users()
+        assert db.current_occupants() == []
+
+        # The store must not invent anyone on startup either.
+        store = presence.PresenceStore()
+        assert store.get_people() == ()
+
+        # Access areas are configuration, not demo data, so they are seeded.
+        assert {a.code for a in db.list_access_areas()} >= {"indoor_lab", "tool_area"}
+    finally:
+        os.environ["LABAUTH_DB_PATH"] = original
 
 
 def test_check_in_and_check_out_roundtrip():
@@ -170,14 +179,16 @@ def test_presence_events_feed():
     presence.store.check_out("Event Person")
 
 
-def test_reset_and_populate_do_not_pollute_log():
+def test_reset_empties_lab_and_populate_does_not_log():
     before = db.count_presence()
     presence.store.populate(5)
     assert len(presence.store.get_people()) == 5
     # populate/reset use the realtime cache only; the immutable log is untouched.
     assert db.count_presence() == before
+
     presence.store.reset()
-    assert {p.name for p in presence.store.get_people()} == {"Aisha Khan", "Rohan Gupta", "Meera Nair"}
+    # reset empties the lab and invents nobody.
+    assert presence.store.get_people() == ()
     assert db.count_presence() == before
 
 

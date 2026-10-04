@@ -19,63 +19,24 @@ Verifies:
 """
 
 import asyncio
-import base64
 import http.cookiejar
 import json
 import os
-import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import urllib.error
-import websockets
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cdp import Browser, CDPClient, wait_for  # noqa: E402
 
 PORT = 8120
-CDP_PORT = 9260
 BASE_URL = f"http://127.0.0.1:{PORT}"
 ARTIFACT_DIR = "/home/rgcodes/.gemini/antigravity/brain/7f11aec8-5a1b-44ae-b22e-d3863d7469f9"
-
-
-class CDPClient:
-    def __init__(self, ws_url: str):
-        self.ws_url = ws_url
-        self.ws = None
-        self._msg_id = 0
-
-    async def connect(self):
-        self.ws = await websockets.connect(self.ws_url)
-
-    async def close(self):
-        if self.ws:
-            await self.ws.close()
-
-    async def send_command(self, method: str, params: dict | None = None):
-        self._msg_id += 1
-        msg = {"id": self._msg_id, "method": method, "params": params or {}}
-        await self.ws.send(json.dumps(msg))
-        while True:
-            raw = await self.ws.recv()
-            data = json.loads(raw)
-            if data.get("id") == self._msg_id:
-                return data.get("result", {})
-
-    async def evaluate(self, expression: str):
-        res = await self.send_command(
-            "Runtime.evaluate",
-            {"expression": expression, "returnByValue": True, "awaitPromise": True},
-        )
-        val = res.get("result", {})
-        if "value" in val:
-            return val["value"]
-        return res
-
-    async def screenshot(self, path: str):
-        res = await self.send_command("Page.captureScreenshot", {"format": "png"})
-        data = base64.b64decode(res["data"])
-        with open(path, "wb") as f:
-            f.write(data)
-        print(f"  ✓ Saved screenshot: {path}")
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -208,51 +169,17 @@ def test_auth_and_session_routes():
 
 async def test_browser_admin_panel():
     print("\n[Test 2] Launching headless browser for end-to-end Admin Panel UI verification...")
-    browser_bin = (
-        shutil.which("brave-browser")
-        or shutil.which("chromium")
-        or shutil.which("google-chrome")
-        or shutil.which("chromium-browser")
-    )
-    assert browser_bin, "Chromium-based browser not found!"
-
-    cmd = [
-        browser_bin,
-        "--headless=new",
-        "--disable-gpu",
-        "--window-size=1440,900",
-        f"--remote-debugging-port={CDP_PORT}",
-        f"{BASE_URL}/admin-display",
-    ]
-    browser_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
-
-    try:
-        req = urllib.request.Request(f"http://127.0.0.1:{CDP_PORT}/json/list")
-        with urllib.request.urlopen(req, timeout=5) as r:
-            targets = json.loads(r.read().decode("utf-8"))
-        target = next((t for t in targets if t.get("type") == "page"), None)
-        assert target, "Browser page target not found!"
-
-        client = CDPClient(target["webSocketDebuggerUrl"])
-        await client.connect()
+    with Browser(f"{BASE_URL}/admin-display") as browser:
+        client = await browser.page()
 
         # Step 2a: Log in through /admin-display dialog
         print("  → Logging into admin via /admin-display dialog...")
-        await client.evaluate("""
-            new Promise((resolve) => {
-                const check = () => {
-                    const btn = document.querySelector('#admin-access-button');
-                    if (btn) {
-                        btn.click();
-                        resolve(true);
-                    } else {
-                        setTimeout(check, 100);
-                    }
-                };
-                check();
-            })
-        """)
+        clicked = await wait_for(
+            client,
+            "(() => { const b = document.querySelector('#admin-access-button');"
+            " if (!b) return false; b.click(); return true; })()",
+        )
+        assert clicked, "Admin access button never appeared"
         time.sleep(0.8)
 
         # Enter password and submit
@@ -469,14 +396,13 @@ async def test_browser_admin_panel():
         print("  ✓ Unauthenticated attempt to return to /admin correctly redirected to /admin-display.")
 
         await client.close()
-    finally:
-        browser_proc.terminate()
 
 
 def main():
+    tmp = tempfile.mkdtemp(prefix="labauth-admin-panel-")
     server_proc = subprocess.Popen(
         [sys.executable, "src/main.py"],
-        env=dict(os.environ, PORT=str(PORT)),
+        env=dict(os.environ, PORT=str(PORT), LABAUTH_DB_PATH=str(Path(tmp) / "labauth.db")),
     )
     time.sleep(2)
     try:
