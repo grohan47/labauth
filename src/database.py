@@ -867,13 +867,17 @@ def set_user_access_areas(
     names: Sequence[str],
     *,
     granted_by: Optional[str] = None,
-    allow_create: bool = True,
+    allow_create: bool = False,
 ) -> None:
     """Replace a user's granted access areas with ``names``."""
     area_ids: list[int] = []
     for name in names:
         if name and name.strip():
-            area_ids.append(ensure_access_area(name, allow_create=allow_create).id)
+            try:
+                area = ensure_access_area(name, allow_create=allow_create)
+                area_ids.append(area.id)
+            except KeyError:
+                continue
     now = utcnow_iso()
     with get_db() as db:
         db.execute("DELETE FROM user_access_areas WHERE user_id = ?", (user_id,))
