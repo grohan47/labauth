@@ -25,6 +25,8 @@ erDiagram
         text plaksha_id UK
         text name
         text photo
+        text email
+        text phone
         boolean is_temp
         text status
         timestamp created_at
@@ -195,3 +197,54 @@ uv run python tests/test_database.py
 The suite runs against a throwaway temporary database and covers schema
 creation, seeding, users/access, bans, credentials and attempts, the audit log,
 the presence feed, and the local backup path.
+
+## Enrolment
+
+The `/enrollment` page requires an admin session. Identity, photo and access
+selection form one vertical editable student card with a centred portrait.
+Only the name is required. The access
+choices come from `access_areas`, start unchecked, and submit stable row IDs.
+The original canonical areas remain Indoor lab and Tool area; enrolment does
+not add example equipment to the configuration.
+
+Linked Git worktrees use the primary checkout's `data/labauth.db` by default,
+so enrolment, administration and the main display share the same configured
+areas and people. Portraits are also served from and saved to the primary
+checkout. Existing worktree-local database files are preserved but are no
+longer selected by default. `LABAUTH_DB_PATH` still takes precedence for
+explicit deployments and disposable tests.
+
+`POST /api/enrolment/complete` validates the draft and calls `create_enrolment()`.
+User, grants and audit entry commit in a single SQLite transaction. Duplicate
+Plaksha IDs and unknown/stale areas reject the entire save. The confirmation
+card uses the saved database record. Enrolment does not check a person in.
+
+Email and phone are nullable record fields, excluded from public presence
+cards. Existing database files receive these columns without losing records.
+Uploaded and captured photos are centre-cropped in the browser, decoded and
+normalised as PNG on the server, and stored as photo paths. Failed saves remove
+their new photo file. Pillow provides image validation.
+
+Both fingerprint and NFC readers currently show **Reader unavailable** and can
+be skipped. Skip remains available regardless of connection or enrolment state,
+including once real readers are integrated. No fingerprint success, NFC identifier
+or credential is simulated.
+The API rejects browser-supplied credential claims. Driver integration and
+fingerprint consistency verification are deferred until real readers are added.
+
+The theme follows the same server clock as the main display: light from 06:00
+until 18:00, dark otherwise. It refreshes in place without clearing the draft.
+The page has no header or step list. A thin red Lyne divider shows progress
+across the top; white-on-red Lyne buttons stay at the bottom for navigation.
+The NFC step uses Polina Mamontova's physical card-and-terminal animation in
+SBB red, with theme-aware fills and a still frame for reduced motion. It has
+no phone or expanding circles. Navigation buttons have no shadow. Source and license are
+recorded in `src/static/animations/README.md`.
+
+Lyne 5.8.0 and design tokens 2.1.3 load from pinned CDN modules, including the
+checkbox and menu modules. The photo preview uses the documented native image
+composition with Lyne image utility classes, avoiding the image component's
+CDN image URL rewriting for local photos. See the official
+[Image](https://digital.sbb.ch/en/design-system/lyne/components/image/),
+[Menu](https://digital.sbb.ch/en/design-system/lyne/components/menu/) and
+[Dialog](https://digital.sbb.ch/en/design-system/lyne/components/dialog/) patterns.

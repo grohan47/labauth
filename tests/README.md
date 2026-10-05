@@ -162,3 +162,23 @@ You can also open the display page in any browser with mock parameters directly 
 - `http://localhost:8081/display?time=14:15`
 - `http://localhost:8081/display?time=21:30&date=September%2012,%202026`
 
+
+## Enrolment
+
+```bash
+uv run python tests/test_enrolment.py
+uv run python tests/test_database.py
+```
+
+The enrolment suite starts its own server and Chromium browser on free ports,
+uses a disposable SQLite database, and checks authentication, database-sourced
+unchecked areas, photo upload and cropping, camera permission denial, draft
+editing and discard, reader skips, name-only saving, duplicate and invalid
+permission rejection, demographic persistence and mobile overflow. It also checks
+the vertical card layout, server-clock light/dark boundaries, NFC animation loading
+and reduced-motion playback. It never
+creates simulated reader credentials. It cleans up its browser process group,
+server and test database. Screenshots go to `/tmp/labauth-enrolment-qa`; set
+`LABAUTH_SCREENSHOT_DIR` to choose another directory. Uploaded test photos are
+removed after validation. Physical webcam capture and reader integration are
+not hardware-tested by this suite.

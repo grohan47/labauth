@@ -45,6 +45,25 @@ def _table_names() -> set[str]:
     return {row["name"] for row in rows}
 
 
+def test_worktree_uses_shared_database():
+    from unittest.mock import patch
+    root = _TMP_DIR / "linked-checkout"
+    primary = _TMP_DIR / "primary-checkout"
+    git_dir = primary / ".git" / "worktrees" / "linked-checkout"
+    root.mkdir()
+    git_dir.mkdir(parents=True)
+    (root / ".git").write_text(f"gitdir: {git_dir}\n")
+    (git_dir / "commondir").write_text("../..\n")
+    with patch.object(db, 'project_root', return_value=root):
+        assert db.shared_project_root() == primary
+        # A test/deployment override always wins over worktree discovery.
+        assert db.db_path() == Path(os.environ['LABAUTH_DB_PATH'])
+        with patch.dict(os.environ, {}, clear=True):
+            assert db.db_path() == primary / 'data' / 'labauth.db'
+    with patch.object(db, 'project_root', return_value=primary):
+        assert db.shared_project_root() == primary
+
+
 def test_schema_and_seed():
     db.init_db()
     names = _table_names()
@@ -207,6 +226,53 @@ def test_snapshot_and_local_backup():
     assert result.run.status == "success"
     assert result.snapshot_path and Path(result.snapshot_path).exists()
     assert db.latest_backup_run().id == result.run.id
+
+
+
+def test_enrolment_atomicity_and_demographics():
+    area = db.get_access_area_by_code("indoor_lab")
+    assert area
+    before = db.count_users()
+    try:
+        db.create_enrolment("Stale grant", access_area_ids=[area.id, 999999])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Unknown grant accepted")
+    assert db.count_users() == before
+    result = db.create_enrolment("Enrolled person", access_area_ids=[area.id],
+                                 plaksha_id="ENROL-001", email="person@example.org", phone="12345")
+    assert result["access"] == [area.label] and result["credentials"] == []
+    try:
+        db.create_enrolment("Duplicate person", access_area_ids=[area.id], plaksha_id="ENROL-001")
+    except sqlite3.IntegrityError:
+        pass
+    else:
+        raise AssertionError("Duplicate external ID accepted")
+    assert db.count_users() == before + 1
+    user = db.update_user(result["id"], email="new@example.org", phone="54321")
+    assert user.email == "new@example.org" and user.phone == "54321"
+    assert not db.is_user_inside(user.id)
+
+
+def test_enrolment_upgrades_existing_database():
+    original_path = os.environ["LABAUTH_DB_PATH"]
+    path = _TMP_DIR / "older-schema.db"
+    try:
+        os.environ["LABAUTH_DB_PATH"] = str(path)
+        with sqlite3.connect(path) as conn:
+            conn.execute("""CREATE TABLE users (id INTEGER PRIMARY KEY, plaksha_id TEXT,
+                name TEXT NOT NULL, photo TEXT NOT NULL, is_temp INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+            conn.execute("INSERT INTO users VALUES (1, 'OLD-001', 'Existing user', ?, 0, 'active', '2026-10-01', '2026-10-01')", (db.DEFAULT_PHOTO,))
+        db.init_db()
+        db.init_db()
+        assert db.get_user(1).name == "Existing user" and db.get_user(1).email is None
+        result = db.create_enrolment("New user", access_area_ids=[], email="new@example.org", phone="999")
+        assert result["email"] == "new@example.org" and result["phone"] == "999"
+        assert db.count_users() == 2
+    finally:
+        os.environ["LABAUTH_DB_PATH"] = original_path
 
 
 def test_failed_remote_backup_is_recorded():

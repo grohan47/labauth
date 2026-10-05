@@ -49,10 +49,6 @@ SETTING_DISPLAY_ALERT = "display_alert"
 DEFAULT_ACCESS_AREAS: tuple[tuple[str, str, int], ...] = (
     ("indoor_lab", "Indoor lab", 10),
     ("tool_area", "Tool area", 20),
-    ("three_d_printers", "3D printers", 30),
-    ("laser_cutter", "Laser cutter", 40),
-    ("cnc_mill", "CNC mill", 50),
-    ("soldering_bench", "Soldering bench", 60),
 )
 
 #: Human spellings accepted from the API / tooling, resolved to a stable code.
@@ -62,15 +58,6 @@ ACCESS_AREA_ALIASES: dict[str, str] = {
     "lab interior": "indoor_lab",
     "tool_area": "tool_area",
     "tool area": "tool_area",
-    "three_d_printers": "three_d_printers",
-    "3d printers": "three_d_printers",
-    "3d_printers": "three_d_printers",
-    "laser_cutter": "laser_cutter",
-    "laser cutter": "laser_cutter",
-    "cnc_mill": "cnc_mill",
-    "cnc mill": "cnc_mill",
-    "soldering_bench": "soldering_bench",
-    "soldering bench": "soldering_bench",
 }
 
 #: Table load order for full backups (respects foreign-key dependencies).
@@ -230,6 +217,30 @@ def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def shared_project_root() -> Path:
+    """Resolve the root of the primary checkout even when running in a worktree."""
+    root = project_root()
+    git_file = root / ".git"
+    if git_file.is_file():
+        try:
+            content = git_file.read_text().strip()
+            if content.startswith("gitdir:"):
+                git_dir_str = content.split(":", 1)[1].strip()
+                git_dir = Path(git_dir_str)
+                if not git_dir.is_absolute():
+                    git_dir = (root / git_dir).resolve()
+                commondir_file = git_dir / "commondir"
+                if commondir_file.is_file():
+                    common = commondir_file.read_text().strip()
+                    common_path = (git_dir / common).resolve()
+                    if common_path.name == ".git":
+                        return common_path.parent
+                    return common_path
+        except Exception:
+            pass
+    return root
+
+
 def db_path() -> Path:
     """Resolve the SQLite database path.
 
@@ -239,7 +250,7 @@ def db_path() -> Path:
     override = os.environ.get("LABAUTH_DB_PATH")
     if override:
         return Path(override).expanduser()
-    return project_root() / "data" / "labauth.db"
+    return shared_project_root() / "data" / "labauth.db"
 
 
 def _iso_from_dt(value: datetime) -> str:
@@ -624,7 +635,7 @@ def search_users(query: str, *, limit: int = 50) -> list[User]:
 
 
 def update_user(user_id: int, **fields: Any) -> Optional[User]:
-    allowed = {"name", "plaksha_id", "photo", "is_temp", "status"}
+    allowed = {"name", "plaksha_id", "photo", "email", "phone", "is_temp", "status"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return get_user(user_id)
@@ -632,6 +643,10 @@ def update_user(user_id: int, **fields: Any) -> Optional[User]:
         updates["is_temp"] = int(bool(updates["is_temp"]))
     if "plaksha_id" in updates:
         updates["plaksha_id"] = _clean(updates["plaksha_id"])
+    if "email" in updates:
+        updates["email"] = _clean(updates["email"])
+    if "phone" in updates:
+        updates["phone"] = _clean(updates["phone"])
     updates["updated_at"] = utcnow_iso()
     assignments = ", ".join(f"{column} = ?" for column in updates)
     with get_db() as db:
@@ -640,6 +655,88 @@ def update_user(user_id: int, **fields: Any) -> Optional[User]:
             (*updates.values(), user_id),
         )
     return get_user(user_id)
+
+
+def create_enrolment(
+    name: str,
+    *,
+    plaksha_id: Optional[str] = None,
+    photo: str = DEFAULT_PHOTO,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    access_area_ids: Sequence[int] = (),
+    is_temp: bool = False,
+) -> dict[str, Any]:
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValueError("Name is required")
+
+    area_ids = list(dict.fromkeys(access_area_ids))
+    now = utcnow_iso()
+    with get_db() as conn:
+        if area_ids:
+            placeholders = ",".join("?" for _ in area_ids)
+            rows = conn.execute(
+                f"SELECT id FROM access_areas WHERE id IN ({placeholders})", area_ids
+            ).fetchall()
+            found_ids = {r["id"] for r in rows}
+            for aid in area_ids:
+                if aid not in found_ids:
+                    raise ValueError(f"Unknown access area id: {aid}")
+
+        cur = conn.execute(
+            """
+            INSERT INTO users (plaksha_id, name, photo, email, phone, is_temp, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            """,
+            (
+                _clean(plaksha_id),
+                clean_name,
+                photo or DEFAULT_PHOTO,
+                _clean(email),
+                _clean(phone),
+                int(bool(is_temp)),
+                now,
+                now,
+            ),
+        )
+        user_id = cur.lastrowid
+
+        for aid in area_ids:
+            conn.execute(
+                """
+                INSERT INTO user_access_areas (user_id, area_id, granted_at, granted_by)
+                VALUES (?, ?, ?, 'admin')
+                """,
+                (user_id, aid, now),
+            )
+
+        conn.execute(
+            """
+            INSERT INTO admin_audit_log (occurred_at, actor, action, entity_type, entity_id, before, after)
+            VALUES (?, 'admin', 'enrol_user', 'user', ?, NULL, ?)
+            """,
+            (now, str(user_id), clean_name),
+        )
+
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        labels = _labels_for(conn, user_id)
+
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "plaksha_id": row["plaksha_id"],
+        "photo": row["photo"],
+        "email": row["email"],
+        "phone": row["phone"],
+        "is_temp": bool(row["is_temp"]),
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "access": labels,
+        "credentials": [],
+        "is_inside": False,
+        "is_banned": False,
+    }
 
 
 def set_user_status(user_id: int, status: str) -> Optional[User]:

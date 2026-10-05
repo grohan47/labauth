@@ -37,6 +37,12 @@ STATIC_ROOT = BASE_DIR / "static" if (BASE_DIR / "static").exists() else BASE_DI
 if not STATIC_ROOT.exists():
     STATIC_ROOT = Path(__file__).resolve().parent / "static"
 
+# Portrait paths in the shared database must also work on the main display.
+shared_root = db.shared_project_root()
+PORTRAIT_ROOT = STATIC_ROOT / "portraits"
+if not getattr(sys, "frozen", False) and db.db_path().resolve() == (shared_root / "data" / "labauth.db").resolve():
+    PORTRAIT_ROOT = shared_root / "src" / "static" / "portraits"
+app.add_static_files("/static/portraits", PORTRAIT_ROOT, max_cache_age=0)
 app.add_static_files("/static", STATIC_ROOT, max_cache_age=0)
 
 
@@ -246,101 +252,76 @@ def api_list_access_areas() -> JSONResponse:
 @app.post("/api/enrolment/complete")
 async def api_enrolment_complete(request: Request) -> JSONResponse:
     if not request_has_valid_admin_session(request):
-        return JSONResponse({"status": "error", "detail": "Admin session required"}, status_code=401)
+        return JSONResponse({"detail": "Admin session required"}, status_code=401)
+    import base64
+    import binascii
+    import io
+    import re
+    import sqlite3
+    import uuid
+    from PIL import Image, UnidentifiedImageError
+
     try:
         data = await request.json()
-    except Exception:
-        return JSONResponse({"status": "error", "detail": "Invalid JSON"}, status_code=400)
+        if not isinstance(data, dict):
+            raise ValueError("Invalid enrolment")
+        fields = {}
+        for field, limit in (("name", 200), ("plaksha_id", 100), ("phone", 100), ("email", 254)):
+            value = data.get(field) or ""
+            if not isinstance(value, str) or len(value) > limit:
+                raise ValueError(f"Check {field.replace('_', ' ')}")
+            fields[field] = value.strip()
+        if not fields["name"]:
+            raise ValueError("Enter your full name")
+        if fields["email"] and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", fields["email"]):
+            raise ValueError("Enter a valid email")
+        area_ids = data.get("access_area_ids", [])
+        if not isinstance(area_ids, list) or len(area_ids) > 100 or any(type(i) is not int for i in area_ids):
+            raise ValueError("Check authorised areas")
+        # The browser cannot assert reader success or supply invented credentials.
+        if data.get("fingerprint_enrolled") or data.get("nfc_uid") or data.get("credentials"):
+            raise ValueError("Readers are unavailable. Skip credential enrolment.")
+        if data.get("access") or data.get("is_temp"):
+            raise ValueError("Reload enrolment to use the current fields")
+        photo = data.get("photo") or db.DEFAULT_PHOTO
+        if not isinstance(photo, str):
+            raise ValueError("Choose a valid photo")
+        image_bytes = None
+        if photo != db.DEFAULT_PHOTO:
+            if not photo.startswith("data:image/png;base64,") or len(photo) > 12 * 1024 * 1024:
+                raise ValueError("Choose a valid photo under 8 MB")
+            try:
+                decoded = base64.b64decode(photo.split(",", 1)[1], validate=True)
+                with Image.open(io.BytesIO(decoded)) as image:
+                    if image.format != "PNG" or image.width > 2048 or image.height > 2048:
+                        raise ValueError("Choose a valid photo")
+                    image.load()
+                    output = io.BytesIO()
+                    image.convert("RGB").save(output, format="PNG")
+                    image_bytes = output.getvalue()
+            except (binascii.Error, UnidentifiedImageError, OSError, Image.DecompressionBombError) as err:
+                raise ValueError("Choose a valid photo") from err
+    except (ValueError, TypeError) as err:
+        return JSONResponse({"detail": str(err)}, status_code=422)
 
-    name = (data.get("name") or "").strip()
-    if not name:
-        return JSONResponse({"status": "error", "detail": "Full name is mandatory"}, status_code=422)
-
-    raw_photo = data.get("photo") or "/static/portraits/default.svg"
-    photo_path = raw_photo
-
-    if raw_photo.startswith("data:image"):
-        try:
-            import base64
-            import uuid
-            header, encoded = raw_photo.split(",", 1)
-            img_bytes = base64.b64decode(encoded)
-            filename = f"portrait_{uuid.uuid4().hex[:8]}.png"
-            dest = STATIC_ROOT / "portraits" / filename
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(img_bytes)
-            photo_path = f"/static/portraits/{filename}"
-        except Exception:
-            photo_path = "/static/portraits/default.svg"
-
-    plaksha_id = (data.get("plaksha_id") or "").strip() or None
-    phone = (data.get("phone") or "").strip() or None
-    email = (data.get("email") or "").strip() or None
-    is_temp = bool(data.get("is_temp", False))
-    access_areas = data.get("access") or []
-
-    db.init_db()
-
+    destination = None
     try:
-        user = db.create_user(
-            name=name,
-            plaksha_id=plaksha_id,
-            photo=photo_path,
-            email=email,
-            phone=phone,
-            is_temp=is_temp,
-            status="active",
-        )
-    except Exception as err:
-        return JSONResponse({"status": "error", "detail": f"Failed to create user: {err}"}, status_code=500)
-
-    if access_areas:
-        try:
-            db.set_user_access_areas(user.id, access_areas, granted_by="admin", allow_create=False)
-        except Exception as err:
-            logger.warning("Failed to set access areas for user %s: %s", user.id, err)
-
-    if data.get("fingerprint_enrolled"):
-        try:
-            db.enroll_credential(
-                user_id=user.id,
-                credential_type="fingerprint",
-                identifier=f"fp_{user.id}_{int(time.time())}",
-            )
-        except Exception:
-            pass
-
-    nfc_uid = (data.get("nfc_uid") or "").strip()
-    if nfc_uid:
-        try:
-            db.enroll_credential(
-                user_id=user.id,
-                credential_type="nfc",
-                identifier=nfc_uid,
-            )
-        except Exception:
-            pass
-
-    try:
-        db.log_audit(
-            actor="admin",
-            action="enrol_user",
-            entity_type="user",
-            entity_id=str(user.id),
-            after=user.name,
-        )
+        if image_bytes is not None:
+            destination = PORTRAIT_ROOT / f"portrait_{uuid.uuid4().hex}.png"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(image_bytes)
+            photo = f"/static/portraits/{destination.name}"
+        record = db.create_enrolment(**fields, photo=photo, access_area_ids=area_ids)
+    except (ValueError, sqlite3.IntegrityError) as err:
+        if destination:
+            destination.unlink(missing_ok=True)
+        detail = str(err) if isinstance(err, ValueError) else "This Plaksha ID is already enrolled"
+        return JSONResponse({"detail": detail}, status_code=409)
     except Exception:
-        pass
-
-    return JSONResponse({
-        "status": "ok",
-        "user": {
-            "id": user.id,
-            "name": user.name,
-            "photo": user.photo,
-            "is_temp": user.is_temp,
-        }
-    })
+        if destination:
+            destination.unlink(missing_ok=True)
+        return JSONResponse({"detail": "Could not save. Try again."}, status_code=500)
+    return JSONResponse({"status": "ok", "user": record})
 
 
 @app.get("/api/time")
