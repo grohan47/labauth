@@ -334,21 +334,13 @@ async def test_browser_admin_panel():
         # Step 2d: Test Enrollment link navigation
         print("\n  → Testing Enrollment navigation and active session...")
         await client.evaluate("window.location.assign('/enrollment')")
-        await client.evaluate("""
-            new Promise((resolve) => {
-                const check = () => {
-                    if (window.location.pathname === '/enrollment') {
-                        resolve(true);
-                    } else {
-                        setTimeout(check, 100);
-                    }
-                };
-                check();
-            })
-        """)
-        time.sleep(0.8)
-
-        enroll_title = await client.evaluate("document.querySelector('#heading-1')?.textContent?.trim()")
+        # The NiceGUI page hydrates asynchronously after navigation commits, so
+        # wait for its rendered content instead of guessing with a fixed sleep.
+        enroll_title = await wait_for(
+            client,
+            "(() => { const h = document.querySelector('#heading-1');"
+            " return h && h.textContent.trim() === 'Hello!' ? h.textContent.trim() : null; })()",
+        )
         assert enroll_title == "Hello!", f"Expected 'Hello!', got '{enroll_title}'"
         print("  ✓ Successfully navigated to /enrollment while authenticated.")
 
