@@ -8,11 +8,12 @@ Verifies:
    - Top-left "Admin." in large Helvetica font.
    - Top-right pure SBB clock with no date or digital time.
    - Top-right Exit button.
-   - 4 large rectangular Lyne cards in a 4x4 coordinate grid:
+   - 5 large rectangular Lyne cards in a coordinate grid:
      1) Enrollment (fingerprint-medium icon) -> /enrollment
      2) Logs (document-text-medium icon) -> /logs
      3) Search (magnifying-glass-medium icon) -> /search
      4) Alerts (sign-exclamation-point-medium icon) -> /admin-alerts-dialog
+     5) Display settings (controls-medium icon) -> /admin/display-settings
 4. Alerts dialog: typing, broadcasting, and clearing an alert via /api/alerts.
 5. Enrollment route (/enrollment) validates active admin session.
 6. Exit button logs out, clears session, and redirects to /admin-display.
@@ -115,7 +116,7 @@ def test_auth_and_session_routes():
     with urllib.request.urlopen(req_enroll) as resp:
         assert resp.status == 200
         html = resp.read().decode("utf-8")
-        assert "Enrollment." in html
+        assert "step-1" in html
         print("  ✓ Authenticated /enrollment loaded successfully with session cookie.")
 
     # 1g: Test alerts API
@@ -267,15 +268,16 @@ async def test_browser_admin_panel():
         assert not panel_info["hasDate"], "Date display should NOT be present on /admin clock!"
         assert not panel_info["hasDigitalTime"], "Digital time display should NOT be present on /admin clock!"
         assert panel_info["hasExitBtn"], "Exit button missing on /admin!"
-        assert panel_info["cardCount"] == 4, f"Expected 4 cards, found {panel_info['cardCount']}"
+        assert panel_info["cardCount"] == 5, f"Expected 5 cards, found {panel_info['cardCount']}"
         assert panel_info["gridDisplay"] == "grid", "Cards container is not a CSS grid!"
 
-        # Verify each of the 4 cards
+        # Verify each of the 5 cards
         labels = [c["label"] for c in panel_info["cardDetails"]]
         assert "Enrollment" in labels, "Enrollment card missing!"
         assert "Logs" in labels, "Logs card missing!"
         assert "Search" in labels, "Search card missing!"
         assert "Alerts" in labels, "Alerts card missing!"
+        assert "Display settings" in labels, "Display settings card missing!"
 
         enroll_card = next(c for c in panel_info["cardDetails"] if c["label"] == "Enrollment")
         assert enroll_card["href"] == "/enrollment", f"Expected /enrollment href, got {enroll_card['href']}"
@@ -292,6 +294,10 @@ async def test_browser_admin_panel():
 
         alerts_card = next(c for c in panel_info["cardDetails"] if c["label"] == "Alerts")
         assert "sign-exclamation-point" in alerts_card["iconName"], f"Expected sign-exclamation-point icon, got {alerts_card['iconName']}"
+
+        settings_card = next(c for c in panel_info["cardDetails"] if c["label"] == "Display settings")
+        assert settings_card["href"] == "/admin/display-settings", f"Expected /admin/display-settings href, got {settings_card['href']}"
+        assert "controls" in settings_card["iconName"], f"Expected controls icon, got {settings_card['iconName']}"
 
         # Capture screenshot of Admin Panel
         os.makedirs(ARTIFACT_DIR, exist_ok=True)
@@ -342,8 +348,8 @@ async def test_browser_admin_panel():
         """)
         time.sleep(0.8)
 
-        enroll_title = await client.evaluate("document.querySelector('.admin-heading')?.textContent?.trim()")
-        assert enroll_title == "Enrollment.", f"Expected 'Enrollment.', got '{enroll_title}'"
+        enroll_title = await client.evaluate("document.querySelector('#heading-1')?.textContent?.trim()")
+        assert enroll_title == "Hello!", f"Expected 'Hello!', got '{enroll_title}'"
         print("  ✓ Successfully navigated to /enrollment while authenticated.")
 
         screenshot_enroll = os.path.join(ARTIFACT_DIR, "admin_enrollment_view.png")

@@ -1429,55 +1429,52 @@ def all_settings() -> dict[str, Optional[str]]:
     return {row["key"]: row["value"] for row in rows}
 
 
+# ---------------------------------------------------------------------------
+# Screen settings
+# ---------------------------------------------------------------------------
+
+SCREEN_TARGETS = ("display", "admin-display")
+
+_SCREEN_FLAGS = ("show_greeter", "show_clock", "show_date", "show_photos", "show_tools",
+                 "show_digital_time", "show_summary", "show_check_in", "show_names", "show_feedback")
+
 DEFAULT_SCREEN_SETTINGS: dict[str, Any] = {
     "show_greeter": True,
     "show_clock": True,
     "show_date": True,
     "show_photos": True,
     "show_tools": True,
-    "grid_ratio": 70,
-    "max_rows": 3,
+    "show_digital_time": True,
+    "show_summary": True,
+    "show_check_in": True,
+    "show_names": True,
+    "show_feedback": True,
 }
 
 
 def get_screen_settings(screen: str = "display") -> dict[str, Any]:
-    """Retrieve persisted display configuration for the specified screen ('display' or 'admin-display')."""
-    key = f"display_settings_{screen}"
-    raw = get_setting(key)
-    if not raw:
-        return dict(DEFAULT_SCREEN_SETTINGS)
-    try:
-        data = json.loads(raw)
-        merged = dict(DEFAULT_SCREEN_SETTINGS)
-        merged.update(data)
-        return merged
-    except Exception:
-        return dict(DEFAULT_SCREEN_SETTINGS)
+    """Persisted layout for ``display`` or ``admin-display``, defaults filled in."""
+    raw = get_setting(f"display_settings_{screen}")
+    settings = dict(DEFAULT_SCREEN_SETTINGS)
+    if raw:
+        try:
+            stored = json.loads(raw)
+        except ValueError:
+            stored = {}
+        if isinstance(stored, dict):
+            settings.update({key: value for key, value in stored.items() if key in DEFAULT_SCREEN_SETTINGS})
+    return {flag: bool(settings[flag]) for flag in _SCREEN_FLAGS}
 
 
 def set_screen_settings(screen: str, settings: dict[str, Any]) -> dict[str, Any]:
-    """Persist display settings for 'display' or 'admin-display' with sanitization."""
-    key = f"display_settings_{screen}"
-    current = get_screen_settings(screen)
-    current.update(settings)
-    current["show_greeter"] = bool(current.get("show_greeter", True))
-    current["show_clock"] = bool(current.get("show_clock", True))
-    current["show_date"] = bool(current.get("show_date", True))
-    current["show_photos"] = bool(current.get("show_photos", True))
-    current["show_tools"] = bool(current.get("show_tools", True))
-    try:
-        ratio = int(current.get("grid_ratio", 70))
-        current["grid_ratio"] = max(30, min(90, ratio))
-    except (ValueError, TypeError):
-        current["grid_ratio"] = 70
-    try:
-        max_rows = int(current.get("max_rows", 3))
-        current["max_rows"] = max(1, min(3, max_rows))
-    except (ValueError, TypeError):
-        current["max_rows"] = 3
-
-    set_setting(key, json.dumps(current))
-    return current
+    """Merge ``settings`` into the stored layout for one screen target."""
+    merged = get_screen_settings(screen)
+    if isinstance(settings, dict):
+        merged.update({key: settings[key] for key in _SCREEN_FLAGS if key in settings})
+    for flag in _SCREEN_FLAGS:
+        merged[flag] = bool(merged[flag])
+    set_setting(f"display_settings_{screen}", json.dumps(merged))
+    return merged
 
 
 # ---------------------------------------------------------------------------

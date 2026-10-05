@@ -1,3 +1,4 @@
+import json
 import sys
 import time
 from datetime import datetime
@@ -20,6 +21,7 @@ from ui.admin_display import (
 from ui.display import build_display, presence_signature, render_presence_html
 from ui.display_settings import build_display_settings_page
 from ui.enrolment import build_enrolment_page
+from ui.lyne import asset_url, lyne_assets
 
 SESSION_COOKIE_NAME = "labauth_admin_session"
 
@@ -57,12 +59,21 @@ def api_get_presence() -> JSONResponse:
 
 
 @app.get("/api/presence/render")
-def api_render_presence() -> JSONResponse:
-    """Server-rendered card markup plus a signature, for in-place client sync."""
+def api_render_presence(request: Request) -> JSONResponse:
+    """Server-rendered card markup plus a signature, for in-place client sync.
+
+    The requesting display passes its ``screen`` target so the cards keep the
+    persisted visibility settings instead of reverting to defaults.
+    """
+    screen = request.query_params.get("screen", "display")
+    if screen not in db.SCREEN_TARGETS:
+        screen = "display"
     people = store.get_people()
+    settings = db.get_screen_settings(screen)
     return JSONResponse({
-        "signature": presence_signature(people),
-        "html": render_presence_html(people),
+        "signature": presence_signature(people) + json.dumps(settings, sort_keys=True),
+        "settings": settings,
+        "html": render_presence_html(people, settings=settings),
     })
 
 
@@ -374,29 +385,34 @@ async def api_set_mock_time(request: Request) -> JSONResponse:
 
 @app.get("/api/settings/display/{screen}")
 def api_get_display_settings(screen: str) -> JSONResponse:
-    if screen not in {"display", "admin-display"}:
+    if screen not in db.SCREEN_TARGETS:
         return JSONResponse({"error": "Unknown screen target"}, status_code=400)
-    return JSONResponse({
-        "screen": screen,
-        "settings": db.get_screen_settings(screen),
-    })
+    return JSONResponse({"status": "ok", "screen": screen, "settings": db.get_screen_settings(screen)})
 
 
 @app.post("/api/settings/display/{screen}")
 async def api_set_display_settings(screen: str, request: Request) -> JSONResponse:
-    if screen not in {"display", "admin-display"}:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    if screen not in db.SCREEN_TARGETS:
         return JSONResponse({"error": "Unknown screen target"}, status_code=400)
     try:
         data = await request.json()
     except Exception:
         data = {}
-    updated = db.set_screen_settings(screen, data)
+    if not isinstance(data, dict):
+        data = {}
+    settings = db.set_screen_settings(screen, data)
+    db.log_audit(
+        "admin",
+        "settings_changed",
+        screen,
+        entity_id="display_settings",
+        before=None,
+        after=json.dumps(settings, sort_keys=True),
+    )
     store.notify_settings_changed(screen)
-    return JSONResponse({
-        "status": "ok",
-        "screen": screen,
-        "settings": updated,
-    })
+    return JSONResponse({"status": "ok", "screen": screen, "settings": settings})
 
 
 FAVICON_PATH = STATIC_ROOT / "favicon.svg"
@@ -442,7 +458,7 @@ def admin_display() -> None:
 @ui.page("/admin", title="LabAuth \u2013 Administration", dark=None, favicon=FAVICON_PATH)
 def admin_panel(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
-        return RedirectResponse("/admin-display")
+        return RedirectResponse("/admin-display?login=1")
     build_admin_panel()
     return None
 
@@ -451,21 +467,21 @@ def admin_panel(request: Request) -> RedirectResponse | None:
 def enrollment_page(request: Request) -> RedirectResponse | None:
     """Sequential Swiss-style enrollment workflow bound by SBB Lyne guidelines."""
     if not request_has_valid_admin_session(request):
-        return RedirectResponse("/admin-display")
+        return RedirectResponse("/admin-display?login=1")
     build_enrolment_page()
     return None
 
 
 @ui.page(
     "/admin/display-settings",
-    title="LabAuth \u2013 Display settings",
+    title="LabAuth \u2013 Display Settings",
     dark=None,
     viewport="width=device-width, initial-scale=1, viewport-fit=cover",
     favicon=FAVICON_PATH,
 )
 def display_settings_page(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
-        return RedirectResponse("/admin-display")
+        return RedirectResponse("/admin-display?login=1")
     build_display_settings_page()
     return None
 
@@ -473,13 +489,11 @@ def display_settings_page(request: Request) -> RedirectResponse | None:
 @ui.page("/logs", title="LabAuth \u2013 Logs", dark=None, favicon=FAVICON_PATH)
 def logs_page(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
-        return RedirectResponse("/admin-display")
-    ui.add_head_html("""
+        return RedirectResponse("/admin-display?login=1")
+    ui.add_head_html(f"""
         <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-        <link rel="stylesheet" href="/static/vendor/sbb-variables.css">
-        <link rel="stylesheet" href="/static/vendor/standard-theme.css">
-        <link rel="stylesheet" href="/static/display.css?v=35">
-        <script type="module" src="/static/vendor/sbb-elements.bundle.js"></script>
+        <link rel="stylesheet" href="{asset_url("display.css")}">
+        {lyne_assets()}
     """)
     ui.html("""
         <main class="admin-panel">
@@ -504,13 +518,11 @@ def logs_page(request: Request) -> RedirectResponse | None:
 @ui.page("/search", title="LabAuth \u2013 Search", dark=None, favicon=FAVICON_PATH)
 def search_page(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
-        return RedirectResponse("/admin-display")
-    ui.add_head_html("""
+        return RedirectResponse("/admin-display?login=1")
+    ui.add_head_html(f"""
         <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-        <link rel="stylesheet" href="/static/vendor/sbb-variables.css">
-        <link rel="stylesheet" href="/static/vendor/standard-theme.css">
-        <link rel="stylesheet" href="/static/display.css?v=35">
-        <script type="module" src="/static/vendor/sbb-elements.bundle.js"></script>
+        <link rel="stylesheet" href="{asset_url("display.css")}">
+        {lyne_assets()}
     """)
     ui.html("""
         <main class="admin-panel">

@@ -170,6 +170,19 @@ uv run python tests/test_enrolment.py
 uv run python tests/test_database.py
 ```
 
+## Display Settings
+
+```bash
+uv run python tests/test_display_settings.py
+```
+
+Covers the settings layer behind `/admin/display-settings`: defaults for an
+unset screen, persistence and per-target isolation between the public and admin
+displays, merging of partial updates, recovery from a corrupt stored value,
+rejection of obsolete manual layout and unknown keys, permanent admin chrome,
+and preservation of every occupant when optional components are hidden.
+Uses a throwaway database.
+
 The enrolment suite starts its own server and Chromium browser on free ports,
 uses a disposable SQLite database, and checks authentication, database-sourced
 unchecked areas, photo upload and cropping, camera permission denial, draft
@@ -182,3 +195,10 @@ server and test database. Screenshots go to `/tmp/labauth-enrolment-qa`; set
 `LABAUTH_SCREENSHOT_DIR` to choose another directory. Uploaded test photos are
 removed after validation. Physical webcam capture and reader integration are
 not hardware-tested by this suite.
+
+Display settings automatically reflow cards into unused greeter/clock cells,
+using at most three tracks. A minimum of one card track is always kept.
+There are no resize handles or row-count controls. Card capacity responds to viewport
+size and enabled content, with additional pages preserving every occupant.
+All four card fields can be hidden independently. Layout updates are applied
+in place, and normal navigation uses content-versioned local assets.

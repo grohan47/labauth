@@ -1,134 +1,166 @@
-"""Unit tests for the Display Settings feature."""
+#!/usr/bin/env python3
+"""Tests for the display settings: persistence, automatic layout settings, and rendering.
+
+Run directly:  PYTHONPATH=src uv run python tests/test_display_settings.py
+Pytest:        uv run pytest tests/test_display_settings.py
+
+The suite always points LABAUTH_DB_PATH at a throwaway temporary database.
+"""
 
 from __future__ import annotations
 
+import json
 import os
-from pathlib import Path
+import shutil
 import sys
-import pytest
+import tempfile
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import database as db
-from presence import PersonInside
-from ui.display import _person_card, _presence_content, render_presence_html
+_TMP_DIR = Path(tempfile.mkdtemp(prefix="labauth-display-settings-"))
+os.environ["LABAUTH_DB_PATH"] = str(_TMP_DIR / "labauth.db")
+
+import database as db  # noqa: E402
+from presence import PersonInside  # noqa: E402
+from ui.display import _person_card, _presence_content  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def temp_db(tmp_path: Path):
-    """Use a clean temporary database for each test."""
-    test_db_path = tmp_path / "test_display_settings.db"
-    old_env = os.environ.get("LABAUTH_DB_PATH")
-    os.environ["LABAUTH_DB_PATH"] = str(test_db_path)
-    db.init_db()
-    yield
-    if old_env is not None:
-        os.environ["LABAUTH_DB_PATH"] = old_env
-    else:
-        os.environ.pop("LABAUTH_DB_PATH", None)
+def _reset() -> None:
+    for screen in db.SCREEN_TARGETS:
+        db.set_screen_settings(screen, dict(db.DEFAULT_SCREEN_SETTINGS))
 
 
-def test_default_display_settings():
-    """Verify default screen settings for display and admin-display."""
-    cfg = db.get_screen_settings("display")
-    assert cfg["show_greeter"] is True
-    assert cfg["show_clock"] is True
-    assert cfg["show_date"] is True
-    assert cfg["show_photos"] is True
-    assert cfg["show_tools"] is True
-    assert cfg["grid_ratio"] == 70
-    assert cfg["max_rows"] == 3
-
-
-def test_update_and_persist_display_settings():
-    """Verify updating and persisting display settings."""
-    updated = db.set_screen_settings("display", {
-        "show_greeter": False,
-        "show_clock": False,
-        "show_photos": False,
-        "grid_ratio": 80,
-        "max_rows": 2,
-    })
-    assert updated["show_greeter"] is False
-    assert updated["show_clock"] is False
-    assert updated["show_date"] is True  # preserved default
-    assert updated["show_photos"] is False
-    assert updated["grid_ratio"] == 80
-    assert updated["max_rows"] == 2
-
-    # Fetch fresh
-    fetched = db.get_screen_settings("display")
-    assert fetched == updated
-
-    # admin-display settings remain unaffected
-    admin_cfg = db.get_screen_settings("admin-display")
-    assert admin_cfg["show_greeter"] is True
-    assert admin_cfg["grid_ratio"] == 70
-
-
-def test_settings_sanitization_and_clamping():
-    """Verify grid_ratio and max_rows clamping."""
-    updated = db.set_screen_settings("display", {
-        "grid_ratio": 150,  # exceeds max 90
-        "max_rows": 10,     # exceeds max 3
-    })
-    assert updated["grid_ratio"] == 90
-    assert updated["max_rows"] == 3
-
-    updated_low = db.set_screen_settings("display", {
-        "grid_ratio": 10,   # below min 30
-        "max_rows": 0,      # below min 1
-    })
-    assert updated_low["grid_ratio"] == 30
-    assert updated_low["max_rows"] == 1
-
-
-def test_person_card_photo_and_tool_toggles():
-    """Verify _person_card respects show_photos and show_tools."""
-    person = PersonInside(
-        name="Test Person",
+def _person(name: str = "Aisha Khan", access: tuple[str, ...] = ("Laser cutter",)) -> PersonInside:
+    return PersonInside(
+        name=name,
         photo="/static/portraits/default.svg",
-        checked_in="12:00",
-        access=("Laser cutter", "3D printers"),
+        checked_in="08:00",
+        access=access,
     )
 
-    # All enabled
-    html_all = _person_card(person, density="1row", show_photos=True, show_tools=True)
-    assert "person-photo" in html_all
-    assert "Laser cutter" in html_all
-    assert "person-card--no-photo" not in html_all
-    assert "person-card--no-tools" not in html_all
 
-    # Photo disabled
-    html_no_photo = _person_card(person, density="1row", show_photos=False, show_tools=True)
-    assert "person-photo" not in html_no_photo
-    assert "Laser cutter" in html_no_photo
-    assert "person-card--no-photo" in html_no_photo
-
-    # Tools disabled
-    html_no_tools = _person_card(person, density="1row", show_photos=True, show_tools=False)
-    assert "person-photo" in html_no_tools
-    assert "Laser cutter" not in html_no_tools
-    assert "person-card--no-tools" in html_no_tools
+def test_defaults_apply_to_unset_targets():
+    _reset()
+    for screen in db.SCREEN_TARGETS:
+        assert db.get_screen_settings(screen) == db.DEFAULT_SCREEN_SETTINGS
 
 
-def test_presence_content_row_limits():
-    """Verify _presence_content respects max_rows and density."""
-    people = tuple(
-        PersonInside(
-            name=f"User {i}",
-            photo="/static/portraits/default.svg",
-            checked_in="10:00",
-            access=("Indoor lab",),
-        )
-        for i in range(6)
-    )
+def test_settings_persist_and_stay_isolated_per_target():
+    _reset()
+    updated = db.set_screen_settings("display", {"show_clock": False, "show_names": False})
+    assert updated["show_clock"] is False
+    assert updated["show_names"] is False
+    assert db.get_screen_settings("display") == updated
 
-    # With max_rows = 1, 6 people should activate carousel with page size 4
-    html_1row = _presence_content(people, settings={"max_rows": 1})
-    assert "carousel-stage" in html_1row
+    assert db.get_screen_settings("admin-display") == db.DEFAULT_SCREEN_SETTINGS
 
-    # With max_rows = 2, 6 people fits in 2 rows without carousel
-    html_2rows = _presence_content(people, settings={"max_rows": 2})
-    assert "people-grid--2rows" in html_2rows
-    assert "carousel-stage" not in html_2rows
+
+def test_partial_updates_preserve_earlier_values():
+    _reset()
+    db.set_screen_settings("display", {"show_photos": False, "show_names": False})
+    merged = db.set_screen_settings("display", {"show_tools": False})
+
+    assert merged["show_photos"] is False
+    assert merged["show_tools"] is False
+    assert merged["show_names"] is False
+    assert merged["show_greeter"] is True
+
+
+def test_old_manual_layout_values_are_ignored():
+    _reset()
+    obsolete = {"grid_ratio": 90, "max_rows": 1, "row_sizes": [10, 80, 10]}
+    db.set_setting("display_settings_display", json.dumps({**obsolete, "show_clock": False}))
+    stored = db.get_screen_settings("display")
+    assert stored["show_clock"] is False
+    assert not any(key in stored for key in obsolete)
+    saved = db.set_screen_settings("display", obsolete)
+    assert saved == stored
+
+
+def test_corrupt_stored_value_falls_back_to_defaults():
+    _reset()
+    db.set_setting("display_settings_display", "{not json")
+    assert db.get_screen_settings("display") == db.DEFAULT_SCREEN_SETTINGS
+
+
+def test_unknown_keys_are_not_persisted():
+    _reset()
+    result = db.set_screen_settings("display", {"nonsense": "value"})
+    assert "nonsense" not in result
+    assert "nonsense" not in db.get_screen_settings("display")
+
+
+def test_person_card_respects_photo_and_access_switches():
+    person = _person()
+
+    full = _person_card(person, density="1row", show_photos=True, show_tools=True)
+    assert "person-photo" in full
+    assert "Laser cutter" in full
+
+    no_photo = _person_card(person, density="1row", show_photos=False, show_tools=True)
+    assert "person-photo" not in no_photo
+    assert "Laser cutter" in no_photo
+    assert "person-card--no-photo" in no_photo
+
+    no_tools = _person_card(person, density="1row", show_photos=True, show_tools=False)
+    assert "person-photo" in no_tools
+    assert "Laser cutter" not in no_tools
+    assert "person-card--no-tools" in no_tools
+
+
+def test_configured_render_never_drops_people():
+    people = tuple(_person(name=f"User {index}") for index in range(20))
+    for components in ({}, {"show_greeter": False}, {"show_greeter": False, "show_clock": False}, {"show_photos": False, "show_tools": False}):
+        html = _presence_content(people, settings=components)
+        assert html.count('<sbb-card ') == len(people)
+        for person in people:
+            assert person.name in html
+
+
+def test_optional_fields_persist():
+    _reset()
+    result = db.set_screen_settings("display", {"show_digital_time": False, "show_check_in": False, "show_summary": False})
+    assert result["show_digital_time"] is False
+    assert result["show_check_in"] is False
+    assert result["show_summary"] is False
+    assert db.get_screen_settings("admin-display") == db.DEFAULT_SCREEN_SETTINGS
+
+
+def test_admin_bar_cannot_be_removed_by_stale_settings():
+    _reset()
+    db.set_setting("display_settings_admin-display", '{"show_admin_bar": false}')
+    assert "show_admin_bar" not in db.get_screen_settings("admin-display")
+    result = db.set_screen_settings("admin-display", {"show_admin_bar": False, "show_cards": False})
+    assert "show_admin_bar" not in result
+    assert "show_cards" not in result
+
+
+def main() -> int:
+    db.init_db()
+    tests = [
+        value
+        for name, value in sorted(globals().items())
+        if name.startswith("test_") and callable(value)
+    ]
+    failures = 0
+    print("=" * 65)
+    print("  LABAUTH DISPLAY SETTINGS SUITE")
+    print("=" * 65)
+    for test in tests:
+        try:
+            test()
+            print(f"  PASS  {test.__name__}")
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(f"  FAIL  {test.__name__}: {type(exc).__name__}: {exc}")
+    print("-" * 65)
+    print(f"  {len(tests) - failures}/{len(tests)} passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    finally:
+        shutil.rmtree(_TMP_DIR, ignore_errors=True)

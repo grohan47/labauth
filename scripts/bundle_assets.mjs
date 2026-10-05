@@ -38,6 +38,15 @@ async function bundle() {
     import '@sbb-esta/lyne-elements/chip-label.js';
     import '@sbb-esta/lyne-elements/clock.js';
     import '@sbb-esta/lyne-elements/icon.js';
+    import '@sbb-esta/lyne-elements/checkbox.js';
+    import '@sbb-esta/lyne-elements/checkbox-group.js';
+    import '@sbb-esta/lyne-elements/radio-button.js';
+    import '@sbb-esta/lyne-elements/radio-button-group.js';
+    import '@sbb-esta/lyne-elements/divider.js';
+    import '@sbb-esta/lyne-elements/link.js';
+    import '@sbb-esta/lyne-elements/menu.js';
+    import '@sbb-esta/lyne-elements/notification.js';
+    import '@sbb-esta/lyne-elements/carousel.js';
   `;
 
   console.log('  → Bundling SBB Elements into vendor/sbb-elements.bundle.js...');

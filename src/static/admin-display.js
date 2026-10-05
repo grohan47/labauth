@@ -1,4 +1,5 @@
-function initialiseAdminAccess() {
+async function initialiseAdminAccess() {
+  await Promise.all(["sbb-dialog", "sbb-button", "sbb-header-button"].map(tag => customElements.whenDefined(tag)));
   const trigger = document.querySelector('#admin-access-button');
   const dialog = document.querySelector('#admin-password-dialog');
   const form = document.querySelector('#admin-password-form');
@@ -40,6 +41,11 @@ function initialiseAdminAccess() {
     }
     window.setTimeout(() => input.focus(), 50);
   });
+
+  if (new URLSearchParams(window.location.search).get('login') === '1') {
+    dialog.open();
+    input.focus();
+  }
 
   cancel.addEventListener('click', close);
 

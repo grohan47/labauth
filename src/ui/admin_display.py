@@ -4,6 +4,8 @@ import time
 
 from nicegui import ui
 
+from ui.lyne import asset_url, lyne_assets
+
 DEFAULT_ADMIN_PASSWORD = "labauth@2026"
 SESSION_MAX_AGE_SECONDS = 3600.0  # 1 hour active session
 
@@ -127,9 +129,7 @@ def build_admin_panel() -> None:
 
     ui.add_head_html(f"""
         <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-        <link rel="stylesheet" href="/static/vendor/sbb-variables.css">
-        <link rel="stylesheet" href="/static/vendor/standard-theme.css">
-        <link rel="stylesheet" href="/static/display.css?v=36">
+        <link rel="stylesheet" href="{asset_url("display.css")}">
         <script>
             (function() {{
                 const theme = "{current_theme}";
@@ -138,7 +138,7 @@ def build_admin_panel() -> None:
             }})();
             {ADMIN_ICONS_JS}
         </script>
-        <script type="module" src="/static/vendor/sbb-elements.bundle.js"></script>
+        {lyne_assets()}
     """)
 
     admin_markup = f"""

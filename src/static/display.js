@@ -118,7 +118,8 @@ async function advanceCarouselSlide() {
 window.advanceCarouselSlide = advanceCarouselSlide;
 
 async function triggerGreetingCycle() {
-  if (!greetingElement || isFadingGreeting) return;
+  if (!greetingElement || greetingElement.closest("[hidden]")) { advanceCarouselSlide(); return; }
+  if (isFadingGreeting) return;
 
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const nextIndex = (currentLanguageIndex + 1) % LANGUAGES.length;
@@ -257,7 +258,7 @@ function setMockTime(timeStr, dateStr = null) {
   }
 
   if (timeElement) {
-    timeElement.textContent = mockTime;
+    if (timeElement) timeElement.textContent = mockTime;
   }
   if (dateElement && mockDate) {
     dateElement.textContent = mockDate;
@@ -335,10 +336,10 @@ async function syncServerTime() {
 window.syncServerTime = syncServerTime;
 
 function renderTime() {
-  if (!timeElement || !greetingElement) return;
+
 
   if (mockTime !== null) {
-    timeElement.textContent = mockTime;
+    if (timeElement) timeElement.textContent = mockTime;
     if (dateElement && mockDate) {
       dateElement.textContent = mockDate;
     }
@@ -361,7 +362,7 @@ function renderTime() {
   }
   lastRenderedSecond = currentSecond;
 
-  timeElement.textContent = timeFormatter.format(now);
+  if (timeElement) timeElement.textContent = timeFormatter.format(now);
   if (dateElement) {
     dateElement.textContent = dateFormatter.format(now);
   }
@@ -378,39 +379,200 @@ function renderTime() {
 }
 
 async function bindDisplayElements() {
-  while (
-    !document.querySelector('#digital-time') ||
-    !document.querySelector('#display-greeting') ||
-    !document.querySelector('.clock-stack sbb-clock') ||
-    !document.querySelector('#clock-date')
-  ) {
-    await new Promise(requestAnimationFrame);
-  }
+  while (!document.querySelector('.display-frame')) await new Promise(requestAnimationFrame);
   timeElement = document.querySelector('#digital-time');
   greetingElement = document.querySelector('#display-greeting');
   dateElement = document.querySelector('#clock-date');
 }
 
 function updateGridLayout(grid) {
+  if (document.querySelector('.configured-display')) { layoutConfiguredCards(); return; }
   if (!grid) return;
   const count = grid.querySelectorAll(':scope > .person-card').length;
+  grid.className = `people-grid people-grid--${count <= 4 ? '1row' : count <= 8 ? '2rows' : '3rows'}`;
+}
 
-  grid.classList.remove(
-    'people-grid--1row',
-    'people-grid--2rows',
-    'people-grid--3rows',
-    'people-grid--standard',
-    'people-grid--compact',
-    'people-grid--dense'
-  );
+let displaySettings;
+let layoutKey = '';
+let layoutContext = '';
+let layoutColumnLimit = Infinity;
+let layoutRowLimit = Infinity;
+let layoutHeaderLimit = Infinity;
+function applyDisplaySettings(cfg, html) {
+  const frame = document.querySelector('.display-frame');
+  if (!frame || !cfg) return;
+  displaySettings = cfg;
+  frame.dataset.settings = JSON.stringify(cfg);
+  for (const node of frame.querySelectorAll('[data-visible]')) node.hidden = !cfg[node.dataset.visible];
+  const timeUnits = (cfg.show_date ? 1 : 0) + (cfg.show_clock ? 4 : 0) + (cfg.show_digital_time ? 1 : 0);
+  const hasHeader = cfg.show_greeter || timeUnits;
+  frame.querySelector('.display-header').hidden = !hasHeader;
+  frame.querySelector('.time-panel').hidden = !timeUnits;
+  frame.classList.toggle('display-frame--no-header', !hasHeader);
+  for (const [flag, cls] of [['show_names', 'hide-names'], ['show_check_in', 'hide-check-in'], ['show_photos', 'hide-photos'], ['show_tools', 'hide-tools']]) frame.classList.toggle(cls, !cfg[flag]);
+  const chrome = document.querySelector('.admin-titlebar');
+  if (chrome) chrome.hidden = false;
+  const wrapper = document.querySelector('.presence-content-wrapper');
+  if (typeof html === 'string') { wrapper.innerHTML = html; layoutContext = ''; }
+  layoutKey = '';
+  requestAnimationFrame(() => { layoutConfiguredCards(); updateGreetingAlignment(); });
+}
+window.applyDisplaySettings = applyDisplaySettings;
 
-  if (count <= 4) {
-    grid.classList.add('people-grid--1row');
-  } else if (count <= 8) {
-    grid.classList.add('people-grid--2rows');
-  } else {
-    grid.classList.add('people-grid--3rows');
+function cardOverflow(card) {
+  const content = card.querySelector('.card-content');
+  return Math.max(card.scrollHeight - card.clientHeight, card.scrollWidth - card.clientWidth,
+    content ? content.scrollHeight - content.clientHeight : 0,
+    content ? content.scrollWidth - content.clientWidth : 0);
+}
+
+function layoutConfiguredCards() {
+  const wrapper = document.querySelector('.presence-content-wrapper');
+  if (!wrapper || !displaySettings) return;
+  const cfg = displaySettings;
+  const cards = [...wrapper.querySelectorAll('.person-card')];
+  const {width, height} = wrapper.getBoundingClientRect();
+  if (!width || !height) return;
+  const context = JSON.stringify([width, height, cfg, cards.length]);
+  if (context !== layoutContext) {
+    layoutContext = context; layoutColumnLimit = Infinity; layoutRowLimit = Infinity; layoutHeaderLimit = Infinity;
   }
+  const gap = Math.max(12, Math.min(24, width * 0.016));
+  // Width supports wrapped names and access labels; height reserves every enabled
+  // field before allocating remaining space to the portrait and card spacing.
+  const hasGreeting = cfg.show_greeter;
+  const hasTime = cfg.show_date || cfg.show_clock || cfg.show_digital_time;
+  const hasHeader = hasGreeting || hasTime;
+  // Measure the complete greeting, including wrapped lines and the active font.
+  // Card fitting may reduce the clock's preferred size, but never this floor.
+  const greetingHeight = hasGreeting ? Math.ceil(document.querySelector('#display-greeting').getBoundingClientRect().height) : 0;
+  const minimumClockSize = Math.max(64, greetingHeight);
+  const preferredClockSize = Math.max(144, minimumClockSize);
+  const minWidth = cfg.show_photos || cfg.show_tools ? 240 : 180;
+  const preferredColumns = hasHeader ? 4 : Math.max(4, Math.floor(width / 300));
+  const columns = Math.max(1, Math.min(Math.max(cards.length, 1), preferredColumns, layoutColumnLimit, Math.floor((width + gap) / (minWidth + gap))));
+  const reserved = columns === 1 && hasGreeting && hasTime ? 1 : (hasGreeting ? Math.max(1, columns - 1) : 0) + (hasTime ? 1 : 0);
+  const fullHeader = reserved >= columns;
+  const summary = document.querySelector('.display-summary');
+  const summaryHeight = cfg.show_summary ? summary.getBoundingClientRect().height + 8 : 0;
+  wrapper.closest('.display-frame').classList.toggle('summary-below-greeter', hasGreeting && cfg.show_summary);
+  const dateHeight = cfg.show_date ? document.querySelector('.clock-date').getBoundingClientRect().height + 8 : 0;
+  const digitalHeight = cfg.show_digital_time ? document.querySelector('.digital-time').getBoundingClientRect().height : 0;
+  const preferredHeaderHeight = Math.max(80, greetingHeight, dateHeight + digitalHeight + (cfg.show_clock ? preferredClockSize + 4 : 0));
+  const minHeaderHeight = Math.max(80, greetingHeight, dateHeight + digitalHeight + (cfg.show_clock ? minimumClockSize + 4 : 0));
+  const summaryReservation = hasGreeting ? summaryHeight : 0;
+  // Keep the card padding and border, then reserve enabled fields and the gaps
+  // between them. Hidden groups must not retain an empty header/footer gap.
+  const hasCardHeader = cfg.show_photos || cfg.show_names;
+  const hasCardBody = cfg.show_check_in || cfg.show_tools;
+  const minHeight = 26 + (cfg.show_photos ? 64 : 0) + (cfg.show_names ? 24 : 0)
+    + (cfg.show_check_in ? 20 : 0) + (cfg.show_tools ? 48 : 0)
+    + (cfg.show_photos && cfg.show_names ? 8 : 0)
+    + (cfg.show_check_in && cfg.show_tools ? 8 : 0)
+    + (hasCardHeader && hasCardBody ? 12 : 0);
+  const minimumRows = fullHeader ? 2 : 1;
+  const headerBudget = fullHeader ? minHeaderHeight + summaryReservation + gap : 0;
+  const maximumCardRows = Math.max(1, Math.floor((height - headerBudget + gap) / (minHeight + gap)));
+  const rows = Math.max(minimumRows, Math.min(layoutRowLimit, Math.ceil((Math.max(cards.length, 1) + reserved) / columns), maximumCardRows + (fullHeader ? 1 : 0)));
+  const key = JSON.stringify([width, height, cards.length, cfg, greetingHeight]);
+  if (key === layoutKey && !wrapper.querySelector('.configured-cards')) return;
+  layoutKey = key;
+  let active = Number(wrapper.querySelector('.carousel-view.is-active')?.dataset.page || 0);
+  const stage = document.createElement('div'); stage.className = 'carousel-stage configured-stage';
+  const capacity = Math.max(1, columns * rows - reserved);
+  const available = Math.max(0, height - gap * (rows - 1));
+  let sizes;
+  if (hasHeader && rows > 1) {
+    const desiredFirst = preferredHeaderHeight + summaryReservation;
+    const first = Math.max(minHeaderHeight + summaryReservation, Math.min(layoutHeaderLimit, available - minHeight * (rows - 1), fullHeader ? desiredFirst : Math.max(available / rows, desiredFirst)));
+    sizes = [first, ...Array(rows - 1).fill((available - first) / (rows - 1))];
+  } else {
+    sizes = Array(rows).fill(available / rows);
+  }
+  const cardRows = fullHeader ? rows - 1 : rows;
+  const preferredPhoto = cardRows === 1 && cards.length <= 4 ? 160 : cardRows <= 2 ? 100 : 68;
+  const preferredName = cardRows === 1 && cards.length <= 4 ? 32 : cardRows <= 2 ? 24 : 18;
+  stage.style.setProperty('--card-photo-size', `${preferredPhoto}px`);
+  stage.style.setProperty('--card-name-size', `${preferredName}px`);
+  stage.style.setProperty('--card-detail-size', width >= 1440 ? '16px' : '14px');
+  stage.style.setProperty('--card-gap', `${gap}px`);
+  stage.style.setProperty('--card-columns', columns);
+  stage.style.setProperty('--card-row-tracks', sizes.map(x => `minmax(0, ${x}px)`).join(' '));
+  const pageCount = Math.max(1, Math.ceil(cards.length / capacity));
+  active = Math.min(active, pageCount - 1);
+  for (let page = 0; page < pageCount; page++) {
+    const view = document.createElement('div');
+    view.className = 'carousel-view configured-page' + (page === active ? ' is-active' : '');
+    view.dataset.page = page;
+    if (hasGreeting) {
+      const slot = document.createElement('div'); slot.className = 'greeter-reservation';
+      slot.style.gridColumn = `1 / span ${Math.max(1, columns - 1)}`; slot.style.gridRow = '1'; view.append(slot);
+    }
+    if (hasTime) {
+      const slot = document.createElement('div'); slot.className = 'time-reservation';
+      slot.style.gridColumn = String(columns); slot.style.gridRow = '1'; view.append(slot);
+    }
+    for (const card of cards.slice(page * capacity, (page + 1) * capacity)) view.append(card);
+    stage.append(view);
+  }
+  wrapper.replaceChildren(stage);
+  wrapper.dataset.capacity = capacity;
+  wrapper.dataset.rows = rows;
+  wrapper.dataset.columns = columns;
+  wrapper.dataset.minCardHeight = minHeight;
+  const frame = wrapper.closest('.display-frame');
+  const frameRect = frame.getBoundingClientRect();
+  if (hasGreeting && cfg.show_summary) frame.style.setProperty('--summary-y', `${sizes[0] - summaryHeight + 8}px`);
+  for (const [selector, reservation] of [['.display-intro', '.greeter-reservation'], ['.time-panel', '.time-reservation']]) {
+    const node = document.querySelector(selector);
+    const slot = stage.querySelector(reservation);
+    if (slot && node) {
+      const rect = slot.getBoundingClientRect();
+      const split = columns === 1 && hasGreeting && hasTime;
+      const headingOffset = !hasGreeting && selector === '.time-panel' ? summaryHeight : 0;
+      Object.assign(node.style, {left: `${rect.left - frameRect.left + (split && selector === '.time-panel' ? rect.width / 2 : 0)}px`, top: `${rect.top - frameRect.top - headingOffset}px`, width: `${split ? rect.width / 2 : rect.width}px`, height: `${rect.height - summaryReservation + headingOffset}px`});
+    }
+  }
+  const timeSpace = sizes[0] - summaryReservation;
+  frame.style.setProperty('--display-clock-size', `${Math.max(minimumClockSize, Math.min(preferredClockSize, timeSpace - dateHeight - digitalHeight - 4))}px`);
+  if (hasGreeting) {
+    const intro = frame.querySelector('.display-intro');
+    const clock = frame.querySelector('sbb-clock');
+    const midpoint = cfg.show_clock ? clock.getBoundingClientRect().top + clock.getBoundingClientRect().height / 2 - intro.getBoundingClientRect().top : intro.clientHeight / 2;
+    intro.style.setProperty('--greeting-midpoint', `${midpoint}px`);
+  }
+  isFadingCarousel = false;
+  // Long labels and small viewports are checked using their rendered dimensions.
+  // If the estimated budget is insufficient, reduce rows and rerun with more room.
+  requestAnimationFrame(() => {
+    let overflow = 0;
+    for (const card of cards) overflow = Math.max(overflow, cardOverflow(card));
+    if (overflow <= 1) return;
+    const photoSize = Number.parseFloat(stage.style.getPropertyValue('--card-photo-size'));
+    if (cfg.show_photos && photoSize > 64) stage.style.setProperty('--card-photo-size', `${Math.max(64, photoSize - overflow - 8)}px`);
+    stage.style.setProperty('--card-name-size', `${Math.min(preferredName, 20)}px`);
+    requestAnimationFrame(() => {
+      if (!cards.some(card => cardOverflow(card) > 1)) return;
+      if (fullHeader && sizes[0] > minHeaderHeight + summaryReservation) layoutHeaderLimit = minHeaderHeight + summaryReservation;
+      else if (rows <= 2 && columns > 2) layoutColumnLimit = columns - 1;
+      else if (rows > minimumRows) { layoutRowLimit = rows - 1; layoutColumnLimit = Infinity; }
+      else if (columns > 1) layoutColumnLimit = columns - 1;
+      else return;
+      layoutKey = ''; layoutConfiguredCards();
+    });
+  });
+}
+function initializeConfiguredDisplay() {
+  const frame = document.querySelector('.display-frame');
+  applyDisplaySettings(JSON.parse(frame.dataset.settings));
+  const wrapper = document.querySelector('.presence-content-wrapper');
+  new ResizeObserver(layoutConfiguredCards).observe(wrapper);
+  // Zoom, font loading and greeting-language changes can alter its height even
+  // when the card area's dimensions stay the same.
+  new ResizeObserver(layoutConfiguredCards).observe(frame.querySelector('#display-greeting'));
+  new MutationObserver(() => { if (wrapper.querySelector('.configured-cards')) { layoutKey = ''; layoutContext = ''; layoutConfiguredCards(); } }).observe(wrapper, {childList: true, subtree: true});
+  Promise.all(['sbb-card', 'sbb-title', 'sbb-chip-label', 'sbb-image', 'sbb-clock'].map(tag => customElements.whenDefined(tag))).then(() => { layoutKey = ''; layoutConfiguredCards(); });
+  document.fonts.ready.then(() => { layoutKey = ''; layoutConfiguredCards(); });
 }
 
 let alertQueue = [];
@@ -559,6 +721,7 @@ function processAlertQueue() {
 }
 
 function handleAuthEvent(event) {
+  if (displaySettings && !displaySettings.show_feedback) return;
   if (!event || !event.type || !event.person) return;
   if (event.id) {
     if (seenEventIds.has(event.id)) {
@@ -730,7 +893,8 @@ async function resyncClock() {
 /** Pull the server-rendered card markup when the presence signature changes. */
 async function refreshPresence() {
   try {
-    const res = await fetch('/api/presence/render');
+    const screen = window.DISPLAY_SCREEN || 'display';
+    const res = await fetch('/api/presence/render?screen=' + encodeURIComponent(screen));
     if (!res.ok) return;
     const data = await res.json();
     if (!data || typeof data.signature !== 'string') return;
@@ -738,8 +902,7 @@ async function refreshPresence() {
     lastPresenceSignature = data.signature;
     const wrapper = document.querySelector('.presence-content-wrapper');
     if (wrapper && typeof data.html === 'string') {
-      wrapper.innerHTML = data.html;
-      updateGreetingAlignment();
+      applyDisplaySettings(data.settings, data.html);
     }
   } catch (err) {
     // Network hiccup: the next tick retries.
@@ -790,6 +953,7 @@ function startUnthrottledTimer(onTick) {
 
 async function start() {
   await bindDisplayElements();
+  initializeConfiguredDisplay();
   await syncServerTime();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -800,7 +964,7 @@ async function start() {
     setMockTime(initialTime, initialDate);
   } else {
     const nowHour = new Date(Date.now() + serverTimeOffsetMs).getHours();
-    greetingElement.textContent = getGreetingText(currentLanguageIndex, nowHour);
+    if (greetingElement) greetingElement.textContent = getGreetingText(currentLanguageIndex, nowHour);
     renderTime();
   }
 

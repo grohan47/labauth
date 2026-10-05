@@ -6,12 +6,13 @@ import html
 
 from nicegui import ui
 import database as db
-from ui.display import (
+from ui.lyne import (
+    asset_url,
     JSDELIVR_NPM,
     LYNE_DESIGN_TOKENS_VERSION,
     LYNE_ELEMENTS_VERSION,
-    _color_scheme,
 )
+from ui.display import _color_scheme
 
 
 def build_enrolment_page() -> None:
@@ -44,11 +45,11 @@ def build_enrolment_page() -> None:
     ui.add_head_html(f"""
         <link rel="stylesheet" href="{JSDELIVR_NPM}/@sbb-esta/lyne-design-tokens@{LYNE_DESIGN_TOKENS_VERSION}/dist/css/sbb-variables.css">
         <link rel="stylesheet" href="{JSDELIVR_NPM}/@sbb-esta/lyne-elements@{LYNE_ELEMENTS_VERSION}/standard-theme.css">
-        <link rel="stylesheet" href="/static/display.css?v=37">
-        <link rel="stylesheet" href="/static/enrolment.css?v=7">
+        <link rel="stylesheet" href="{asset_url("display.css")}">
+        <link rel="stylesheet" href="{asset_url("enrolment.css")}">
         <script>document.documentElement.dataset.theme = "{theme}"; document.documentElement.style.colorScheme = "{theme}"; document.documentElement.classList.add("sbb-{theme}");</script>
         {module_tags}
-        <script type="module" src="/static/enrolment.js?v=7"></script>
+        <script type="module" src="{asset_url("enrolment.js")}"></script>
     """)
     ui.html(f"""
     <main class="enrolment-page">
