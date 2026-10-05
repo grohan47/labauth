@@ -1018,12 +1018,18 @@ sbb-icon.alert-bar-icon {
 
 .admin-cards-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  grid-template-rows: auto;
   gap: var(--sbb-spacing-responsive-l);
   flex: 1 1 0%;
   min-height: 0;
   margin-block: var(--sbb-spacing-fixed-4x);
+}
+
+@media (min-width: 64rem) {
+  .admin-cards-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .admin-card {
@@ -1185,4 +1191,432 @@ sbb-icon.alert-bar-icon {
   .display-greeting {
     transition: none !important;
   }
+}
+
+/* ==========================================================================
+   Display Customization & Settings (Swiss Grid & Blueprint Wireframe)
+   ========================================================================== */
+
+.display-frame.display-frame--no-header {
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+
+.display-frame.has-custom-ratio {
+  grid-template-rows: calc(100% - var(--display-grid-ratio, 70%)) minmax(0, 1fr);
+}
+
+.person-card--no-photo .person-photo {
+  display: none !important;
+}
+
+.person-card--no-photo {
+  justify-content: center !important;
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.person-card--no-tools .access-list {
+  display: none !important;
+}
+
+.display-settings-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sbb-spacing-responsive-s);
+  max-width: 68rem;
+  margin-inline: auto;
+  margin-block-start: var(--sbb-spacing-fixed-3x);
+  padding-block-end: var(--sbb-spacing-responsive-l);
+}
+
+.settings-top-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sbb-spacing-fixed-3x);
+}
+
+.settings-tabs {
+  display: inline-flex;
+  padding: 4px;
+  background: var(--display-surface);
+  border: var(--sbb-border-width-1x) solid var(--display-border);
+  border-radius: var(--sbb-border-radius-2x);
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: var(--sbb-text-font-size-s);
+  font-weight: 500;
+  color: var(--display-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--sbb-border-radius-1x);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-tab:hover {
+  color: var(--display-text);
+}
+
+.settings-tab.active {
+  color: var(--display-text);
+  background: var(--display-background);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  font-weight: 700;
+}
+
+.settings-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.settings-status-banner {
+  padding: 10px 16px;
+  background: var(--display-surface);
+  border: 1px solid var(--sbb-color-red);
+  border-radius: var(--sbb-border-radius-2x);
+  font-size: var(--sbb-text-font-size-s);
+  color: var(--display-text);
+  display: flex;
+  align-items: center;
+  animation: fadeIn 0.25s ease;
+}
+
+.settings-status-banner.error {
+  border-color: var(--sbb-color-red);
+  background: rgba(235, 0, 0, 0.1);
+}
+
+.settings-toggles-card {
+  padding: var(--sbb-spacing-fixed-3x);
+  background: var(--display-surface);
+  border: var(--sbb-border-width-1x) solid var(--display-border);
+  border-radius: var(--sbb-border-radius-2x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.settings-card-legend {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--display-muted);
+}
+
+.settings-checkboxes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.settings-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--sbb-text-font-size-s);
+  color: var(--display-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sbb-native-check {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--sbb-color-red);
+  cursor: pointer;
+}
+
+/* Blueprint Outline Canvas */
+.blueprint-canvas-shell {
+  background: var(--display-surface);
+  border: 2px solid var(--display-border);
+  border-radius: var(--sbb-border-radius-4x);
+  padding: var(--sbb-spacing-fixed-3x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sbb-spacing-fixed-2x);
+}
+
+.blueprint-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--display-muted);
+}
+
+.blueprint-tag {
+  color: var(--sbb-color-red);
+  font-weight: 700;
+}
+
+.blueprint-frame {
+  border: 1.5px dashed var(--display-border);
+  border-radius: var(--sbb-border-radius-2x);
+  padding: var(--sbb-spacing-fixed-3x);
+  min-height: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sbb-spacing-fixed-2x);
+  background-size: 20px 20px;
+  background-image: 
+    linear-gradient(to right, rgba(128, 128, 128, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(128, 128, 128, 0.07) 1px, transparent 1px);
+  position: relative;
+}
+
+.outline-box {
+  border: 1.5px dashed var(--display-border);
+  border-radius: var(--sbb-border-radius-2x);
+  padding: 10px 14px;
+  background: var(--display-background);
+  transition: all 0.25s ease;
+}
+
+.outline-admin-bar {
+  background: rgba(235, 0, 0, 0.06);
+  border: 1px solid var(--sbb-color-red);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.outline-header-zone {
+  display: grid;
+  grid-template-columns: 8fr 4fr;
+  gap: var(--sbb-spacing-fixed-2x);
+  transition: all 0.3s ease;
+}
+
+.outline-greeter {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 5.5rem;
+}
+
+.outline-title-red {
+  color: var(--sbb-color-red);
+  font-family: "Helvetica Neue Bold", sans-serif;
+  font-size: 1.1rem;
+}
+
+.outline-desc {
+  font-size: 0.8rem;
+  color: var(--display-muted);
+  font-family: monospace;
+}
+
+.outline-time {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 5.5rem;
+}
+
+.outline-date {
+  font-size: 0.75rem;
+  font-family: monospace;
+  color: var(--display-text);
+  border-bottom: 1px dashed var(--display-border);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+.outline-clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.outline-clock-disc {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid var(--sbb-color-red);
+  display: grid;
+  place-items: center;
+  font-size: 0.6rem;
+  font-family: monospace;
+}
+
+.outline-digital-time {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+/* Draggable Resize Handle */
+.outline-drag-handle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: ns-resize;
+  user-select: none;
+  padding-block: 4px;
+  transition: all 0.2s ease;
+}
+
+.outline-drag-handle:hover .handle-grip,
+.outline-drag-handle.is-dragging .handle-grip {
+  border-color: var(--sbb-color-red);
+  color: var(--sbb-color-red);
+  box-shadow: 0 0 0 2px rgba(235, 0, 0, 0.2);
+}
+
+.outline-drag-handle:hover .handle-line,
+.outline-drag-handle.is-dragging .handle-line {
+  background: var(--sbb-color-red);
+}
+
+.handle-line {
+  flex: 1;
+  height: 1px;
+  background: var(--display-border);
+  transition: background 0.2s ease;
+}
+
+.handle-grip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  background: var(--display-surface);
+  border: 1px solid var(--display-border);
+  font-family: monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--display-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.handle-icon {
+  color: var(--sbb-color-red);
+  font-weight: 700;
+}
+
+/* Cards Grid Outline Zone */
+.outline-grid-zone {
+  border: 1.5px solid var(--sbb-color-red);
+  border-radius: var(--sbb-border-radius-2x);
+  background: rgba(235, 0, 0, 0.03);
+  padding: var(--sbb-spacing-fixed-2x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sbb-spacing-fixed-2x);
+  flex: 70;
+  min-height: 200px;
+  transition: all 0.3s ease;
+}
+
+.outline-grid-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+.outline-label {
+  font-weight: 700;
+  color: var(--display-text);
+}
+
+.outline-sublabel {
+  color: var(--display-muted);
+}
+
+.outline-cards-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 8px;
+  flex: 1;
+}
+
+.outline-card-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.outline-card {
+  border: 1px solid var(--display-border);
+  border-radius: var(--sbb-border-radius-2x);
+  background: var(--display-surface);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.outline-card--sub {
+  color: var(--display-muted);
+  font-size: 0.75rem;
+  font-family: monospace;
+  padding: 6px;
+}
+
+.outline-card-photo {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid var(--sbb-color-red);
+  display: grid;
+  place-items: center;
+  font-size: 0.55rem;
+  font-family: monospace;
+}
+
+.outline-card-name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.outline-card-time {
+  font-size: 0.65rem;
+  color: var(--display-muted);
+  font-family: monospace;
+}
+
+.outline-card-tools {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.outline-tool-chip {
+  padding: 2px 6px;
+  background: var(--sbb-color-red);
+  color: white;
+  border-radius: 9999px;
+  font-size: 0.55rem;
+  font-family: monospace;
+}
+
+.settings-footer-info {
+  font-size: 0.8rem;
+  color: var(--display-muted);
+  border-top: 1px solid var(--display-border);
+  padding-top: var(--sbb-spacing-fixed-2x);
 }

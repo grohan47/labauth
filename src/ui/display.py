@@ -74,21 +74,38 @@ def _grid_density(count: int) -> str:
     return "3rows"
 
 
-def _person_card(person: PersonInside, *, density: str) -> str:
+def _person_card(
+    person: PersonInside,
+    *,
+    density: str,
+    show_photos: bool = True,
+    show_tools: bool = True,
+) -> str:
     tool_count = len(person.access)
     chip_size = "xs" if (density == "3rows" or tool_count > 2) else "s"
-    access = "".join(chip(item, size=chip_size) for item in person.access)
+    access = "".join(chip(item, size=chip_size) for item in person.access) if show_tools else ""
     visual_level = 5 if density == "3rows" else 4 if density == "2rows" else 3
     spacing = {
         "1row": "sbb-card-spacing-xxs",
         "2rows": "sbb-card-spacing-xxs",
         "3rows": "sbb-card-spacing-4x-xxs",
     }.get(density, "sbb-card-spacing-xxs")
+
+    photo_markup = f"""
+        <figure class="person-photo sbb-figure">
+            {image(person.photo, alt=f"Portrait of {person.name}", css_class="sbb-image-1-1")}
+        </figure>
+    """ if show_photos else ""
+
+    tools_markup = f"""
+        <div class="access-list access-list--grid access-list--tools-{min(tool_count, 4)}">
+            {access}
+        </div>
+    """ if (show_tools and access) else ""
+
     content = f"""
         <div class="card-id-header">
-            <figure class="person-photo sbb-figure">
-                {image(person.photo, alt=f"Portrait of {person.name}", css_class="sbb-image-1-1")}
-            </figure>
+            {photo_markup}
             {title(person.name, level=2, visual_level=visual_level, css_class="person-name")}
         </div>
         <div class="card-id-body">
@@ -96,25 +113,62 @@ def _person_card(person: PersonInside, *, density: str) -> str:
                 <span class="check-in-label">Check-in time</span>
                 <time class="check-in-time" datetime="{person.checked_in}">{person.checked_in}</time>
             </div>
-            <div class="access-list access-list--grid access-list--tools-{min(tool_count, 4)}">
-                {access}
-            </div>
+            {tools_markup}
         </div>
     """
-    return card(content, css_class=f"person-card person-card--{density} person-card--tools-{min(tool_count, 4)} {spacing}")
+    extra_classes = []
+    if not show_photos:
+        extra_classes.append("person-card--no-photo")
+    if not show_tools:
+        extra_classes.append("person-card--no-tools")
+    extra_str = f" {' '.join(extra_classes)}" if extra_classes else ""
+    return card(content, css_class=f"person-card person-card--{density} person-card--tools-{min(tool_count, 4)} {spacing}{extra_str}")
 
 
-def _people_grid(people: tuple[PersonInside, ...], *, density: str = "1row") -> str:
-    cards = "".join(_person_card(person, density=density) for person in people)
+def _people_grid(
+    people: tuple[PersonInside, ...],
+    *,
+    density: str = "1row",
+    show_photos: bool = True,
+    show_tools: bool = True,
+) -> str:
+    cards = "".join(
+        _person_card(person, density=density, show_photos=show_photos, show_tools=show_tools)
+        for person in people
+    )
     return f"""
         <div class="people-grid people-grid--{density}">{cards}</div>
     """
 
 
-def _carousel_view(page_people: tuple[PersonInside, ...], page_idx: int, is_active: bool) -> str:
-    row1_cards = "".join(_person_card(p, density="2rows") for p in page_people[:4])
-    row2_cards = "".join(_person_card(p, density="2rows") for p in page_people[4:8])
+def _carousel_view(
+    page_people: tuple[PersonInside, ...],
+    page_idx: int,
+    is_active: bool,
+    *,
+    show_photos: bool = True,
+    show_tools: bool = True,
+    max_rows: int = 2,
+) -> str:
     active_class = " is-active" if is_active else ""
+    if max_rows == 1:
+        row1_cards = "".join(
+            _person_card(p, density="1row", show_photos=show_photos, show_tools=show_tools)
+            for p in page_people[:4]
+        )
+        return f"""
+            <div class="carousel-view{active_class}" data-page="{page_idx}">
+                <div class="carousel-row carousel-row--top">{row1_cards}</div>
+            </div>
+        """
+    row1_cards = "".join(
+        _person_card(p, density="2rows", show_photos=show_photos, show_tools=show_tools)
+        for p in page_people[:4]
+    )
+    row2_cards = "".join(
+        _person_card(p, density="2rows", show_photos=show_photos, show_tools=show_tools)
+        for p in page_people[4:8]
+    )
     return f"""
         <div class="carousel-view{active_class}" data-page="{page_idx}">
             <div class="carousel-row carousel-row--top">{row1_cards}</div>
@@ -123,20 +177,36 @@ def _carousel_view(page_people: tuple[PersonInside, ...], page_idx: int, is_acti
     """
 
 
-def _presence_content(people: tuple[PersonInside, ...] | None = None) -> str:
+def _presence_content(
+    people: tuple[PersonInside, ...] | None = None,
+    *,
+    settings: dict | None = None,
+) -> str:
     if people is None:
         people = store.get_people()
 
-    if len(people) <= 12:
-        density = _grid_density(len(people))
-        return _people_grid(people, density=density)
+    show_photos = True if settings is None else bool(settings.get("show_photos", True))
+    show_tools = True if settings is None else bool(settings.get("show_tools", True))
+    max_rows = 3 if settings is None else int(settings.get("max_rows", 3))
 
+    page_limit = 4 if max_rows == 1 else (8 if max_rows == 2 else 12)
+
+    if len(people) <= page_limit:
+        if max_rows == 1:
+            density = "1row"
+        elif max_rows == 2:
+            density = "1row" if len(people) <= 4 else "2rows"
+        else:
+            density = _grid_density(len(people))
+        return _people_grid(people, density=density, show_photos=show_photos, show_tools=show_tools)
+
+    slice_size = 4 if max_rows == 1 else 8
     pages = tuple(
-        people[start : start + 8]
-        for start in range(0, len(people), 8)
+        people[start : start + slice_size]
+        for start in range(0, len(people), slice_size)
     )
     views = "".join(
-        _carousel_view(page, idx, idx == 0)
+        _carousel_view(page, idx, idx == 0, show_photos=show_photos, show_tools=show_tools, max_rows=max_rows)
         for idx, page in enumerate(pages)
     )
     return f'<div class="carousel-stage">{views}</div>'
@@ -152,9 +222,13 @@ def presence_signature(people: tuple[PersonInside, ...] | None = None) -> str:
     )
 
 
-def render_presence_html(people: tuple[PersonInside, ...] | None = None) -> str:
+def render_presence_html(
+    people: tuple[PersonInside, ...] | None = None,
+    *,
+    settings: dict | None = None,
+) -> str:
     """Server-rendered card markup, reused for in-place client refreshes."""
-    return _presence_content(people)
+    return _presence_content(people, settings=settings)
 
 
 from pathlib import Path
@@ -245,31 +319,65 @@ def build_display(*, admin: bool = False) -> None:
 
         ui.html(admin_chrome(), sanitize=False)
 
+    import database as db
+
+    screen_target = "admin-display" if admin else "display"
+    cfg = db.get_screen_settings(screen_target)
+    show_greeter = cfg.get("show_greeter", True)
+    show_clock = cfg.get("show_clock", True)
+    show_date = cfg.get("show_date", True)
+    grid_ratio = cfg.get("grid_ratio", 70)
+
+    header_parts = []
+    if show_greeter:
+        header_parts.append(f"""
+            <div class="display-intro">
+                {title(_initial_greeting(), level=1, visual_level=2, css_class="display-greeting", html_id="display-greeting")}
+            </div>
+        """)
+
+    time_parts = []
+    if show_date:
+        time_parts.append(f'<time class="clock-date" id="clock-date">{_formatted_date()}</time>')
+    if show_clock:
+        time_parts.append('<sbb-clock aria-label="Analogue clock"></sbb-clock>')
+        time_parts.append('<time class="digital-time" id="digital-time">--:--</time>')
+
+    if time_parts:
+        header_parts.append(f"""
+            <aside class="time-panel" aria-label="Current time">
+                <div class="clock-stack">
+                    {"".join(time_parts)}
+                </div>
+            </aside>
+        """)
+
+    has_header = bool(header_parts)
+    header_markup = f"""
+        <header class="display-header sbb-grid-only">
+            {"".join(header_parts)}
+        </header>
+    """ if has_header else ""
+
+    frame_classes = "display-frame"
+    if not has_header:
+        frame_classes += " display-frame--no-header"
+    else:
+        frame_classes += " has-custom-ratio"
+
     display_classes = "display display-host admin-display" if admin else "display display-host"
     with ui.element("main").classes(display_classes).props(f'data-theme="{_color_scheme()}" aria-labelledby="display-greeting"'):
         with ui.element("sbb-container").classes("display-shell").props('color="transparent"'):
-            with ui.element("div").classes("display-frame"):
-                header_markup = f"""
-                    <header class="display-header sbb-grid-only">
-                        <div class="display-intro">
-                            {title(_initial_greeting(), level=1, visual_level=2, css_class="display-greeting", html_id="display-greeting")}
-                        </div>
-
-                        <aside class="time-panel" aria-label="Current time">
-                            <div class="clock-stack">
-                                <time class="clock-date" id="clock-date">{_formatted_date()}</time>
-                                <sbb-clock aria-label="Analogue clock"></sbb-clock>
-                                <time class="digital-time" id="digital-time">--:--</time>
-                            </div>
-                        </aside>
-                    </header>
-                """
-                ui.html(header_markup, sanitize=False)
+            frame_el = ui.element("div").classes(frame_classes)
+            frame_el.style(f"--display-grid-ratio: {grid_ratio}%;")
+            with frame_el:
+                if header_markup:
+                    ui.html(header_markup, sanitize=False)
 
                 presence_section = ui.element("section").classes("current-presence").props('aria-label="People currently in the lab"')
                 with presence_section:
                     ui.html('<p class="display-summary">Here’s who is in the lab.</p>', sanitize=False)
-                    presence_body = ui.html(_presence_content(), sanitize=False).classes("presence-content-wrapper")
+                    presence_body = ui.html(_presence_content(settings=cfg), sanitize=False).classes("presence-content-wrapper")
 
             ui.html('<div id="auth-alert-overlay" class="auth-alert-overlay" role="dialog" aria-modal="true" aria-live="assertive" hidden></div>', sanitize=False)
             ui.html('<div id="auth-feedback" class="auth-feedback" role="status" aria-live="polite" hidden></div>', sanitize=False)
@@ -279,7 +387,15 @@ def build_display(*, admin: bool = False) -> None:
     def on_presence_update(event: dict | None = None) -> None:
         try:
             with client:
-                presence_body.content = _presence_content()
+                if event and event.get("type") == "display_settings_updated":
+                    screen = event.get("screen")
+                    if screen is None or screen == screen_target:
+                        if client.has_socket_connection:
+                            client.run_javascript("window.location.reload();")
+                        return
+
+                current_cfg = db.get_screen_settings(screen_target)
+                presence_body.content = _presence_content(settings=current_cfg)
                 if client.has_socket_connection:
                     mock_t = store.get_mock_time()
                     mock_d = store.get_mock_date()

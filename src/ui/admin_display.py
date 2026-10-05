@@ -54,7 +54,9 @@ const ADMIN_ICONS = {
     'sign-exclamation-point-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="currentColor" fill-rule="evenodd" d="m17.25 3.376.447.901 13.05 26.25.36.723H3.392l.359-.723 13.05-26.25zM29.493 30.25 17.25 5.623 5.006 30.25zM16.75 27v-3h1v3zm1-6v-9h-1v9z" clip-rule="evenodd"/></svg>',
     'sign-exclamation-point-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="m11.5 1.877.448.9 8.7 17.5.36.723H1.992l.36-.723 8.7-17.5zM3.607 20h15.786L11.5 4.123zM11 18v-2h1v2zm1-4V8h-1v6z" clip-rule="evenodd"/></svg>',
     'exit-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M3.5 4H3v16h13v-3h-1v2H4V5h11v2h1V4H3.5m14.212 5.005 3.142 3.141.353.354-.353.353-3.142 3.15-.707-.707L19.295 13H7v-1h12.293l-2.288-2.287z" clip-rule="evenodd"/></svg>',
-    'cross-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="m12.707 12 5.647-5.647-.707-.707L12 11.293 6.354 5.646l-.708.707L11.293 12l-5.647 5.646.708.707L12 12.707l5.647 5.646.707-.707z" clip-rule="evenodd"/></svg>'
+    'cross-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="m12.707 12 5.647-5.647-.707-.707L12 11.293 6.354 5.646l-.708.707L11.293 12l-5.647 5.646.708.707L12 12.707l5.647 5.646.707-.707z" clip-rule="evenodd"/></svg>',
+    'controls-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="currentColor" fill-rule="evenodd" d="M4 8h8v1H4zm12 0h16v1H16zm-5-3h2v7h-2zm-7 11h16v1H4zm20 0h8v1h-8zm-5-3h2v7h-2zm-15 11h6v1H4zm10 0h18v1H14zm-5-3h2v7H9z" clip-rule="evenodd"/></svg>',
+    'controls-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M3 5h5v1H3zm9 0h9v1h-9zm-5-2h2v5H7zm-4 8h11v1H3zm15 0h3v1h-3zm-5-2h2v5h-2zM3 17h3v1H3zm7 0h11v1H10zm-5-2h2v5H5z" clip-rule="evenodd"/></svg>'
 };
 
 globalThis.sbbConfig = globalThis.sbbConfig || {};
@@ -191,6 +193,15 @@ def build_admin_panel() -> None:
                         <div class="admin-card-inner">
                             <sbb-icon name="sign-exclamation-point-medium" class="admin-card-icon"></sbb-icon>
                             <span class="admin-card-label">Alerts</span>
+                        </div>
+                    </sbb-card>
+
+                    <!-- 5. Display Settings: customize layout and visibility for displays -->
+                    <sbb-card color="transparent-bordered" class="admin-card" id="admin-card-display-settings">
+                        <sbb-card-link href="/admin/display-settings">Display settings</sbb-card-link>
+                        <div class="admin-card-inner">
+                            <sbb-icon name="controls-medium" class="admin-card-icon"></sbb-icon>
+                            <span class="admin-card-label">Display settings</span>
                         </div>
                     </sbb-card>
                 </div>

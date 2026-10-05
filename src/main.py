@@ -18,6 +18,7 @@ from ui.admin_display import (
     is_admin_session_valid,
 )
 from ui.display import build_display, presence_signature, render_presence_html
+from ui.display_settings import build_display_settings_page
 from ui.enrolment import build_enrolment_page
 
 SESSION_COOKIE_NAME = "labauth_admin_session"
@@ -371,6 +372,33 @@ async def api_set_mock_time(request: Request) -> JSONResponse:
     })
 
 
+@app.get("/api/settings/display/{screen}")
+def api_get_display_settings(screen: str) -> JSONResponse:
+    if screen not in {"display", "admin-display"}:
+        return JSONResponse({"error": "Unknown screen target"}, status_code=400)
+    return JSONResponse({
+        "screen": screen,
+        "settings": db.get_screen_settings(screen),
+    })
+
+
+@app.post("/api/settings/display/{screen}")
+async def api_set_display_settings(screen: str, request: Request) -> JSONResponse:
+    if screen not in {"display", "admin-display"}:
+        return JSONResponse({"error": "Unknown screen target"}, status_code=400)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    updated = db.set_screen_settings(screen, data)
+    store.notify_settings_changed(screen)
+    return JSONResponse({
+        "status": "ok",
+        "screen": screen,
+        "settings": updated,
+    })
+
+
 FAVICON_PATH = STATIC_ROOT / "favicon.svg"
 
 
@@ -425,6 +453,20 @@ def enrollment_page(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
         return RedirectResponse("/admin-display")
     build_enrolment_page()
+    return None
+
+
+@ui.page(
+    "/admin/display-settings",
+    title="LabAuth \u2013 Display settings",
+    dark=None,
+    viewport="width=device-width, initial-scale=1, viewport-fit=cover",
+    favicon=FAVICON_PATH,
+)
+def display_settings_page(request: Request) -> RedirectResponse | None:
+    if not request_has_valid_admin_session(request):
+        return RedirectResponse("/admin-display")
+    build_display_settings_page()
     return None
 
 

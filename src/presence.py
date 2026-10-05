@@ -360,6 +360,9 @@ class PresenceStore:
         with self._lock:
             return self._alert
 
+    def notify_settings_changed(self, screen: str = "display") -> None:
+        self._notify({"type": "display_settings_updated", "screen": screen})
+
 
 # ``PersonInside`` remains the display-facing projection of a user.
 store = PresenceStore()
