@@ -174,6 +174,8 @@ uv run python tests/test_database.py
 
 ```bash
 uv run python tests/test_display_settings.py
+uv run python tests/test_lyne_assets.py
+uv run python tests/test_display_settings_browser.py
 ```
 
 Covers the settings layer behind `/admin/display-settings`: defaults for an
@@ -182,6 +184,15 @@ displays, merging of partial updates, recovery from a corrupt stored value,
 rejection of obsolete manual layout and unknown keys, permanent admin chrome,
 and preservation of every occupant when optional components are hidden.
 Uses a throwaway database.
+
+The asset tests reject legacy, incomplete, corrupt and outdated local bundles.
+The browser suite uses its own server, disposable database and fresh Chromium
+profile to exercise all ten checkboxes, preview visibility, screen switching,
+Apply, Reset, reload persistence, keyboard activation and Back navigation.
+It checks 375px, 768px and 1440px layouts in both themes, script/resource errors
+and horizontal overflow. Screenshots go to `/tmp/labauth-settings-qa` (override
+with `LABAUTH_SCREENSHOT_DIR`). There is no committed visual baseline; these
+screenshots support manual inspection rather than automated visual regression.
 
 The enrolment suite starts its own server and Chromium browser on free ports,
 uses a disposable SQLite database, and checks authentication, database-sourced
@@ -202,3 +213,46 @@ There are no resize handles or row-count controls. Card capacity responds to vie
 size and enabled content, with additional pages preserving every occupant.
 All four card fields can be hidden independently. Layout updates are applied
 in place, and normal navigation uses content-versioned local assets.
+
+## Alerts
+
+```bash
+uv run python tests/test_alerts.py
+```
+
+The alerts suite starts its own server and Chromium browser on free ports with a
+disposable database. It exercises the `/admin` alerts pane (create, severity
+ordering, inline edit, every TTL preset and delete) and the single-line
+ticker on both `/display` and `/admin-display`, including the line-by-line reveal
+of an over-long message, the short alert that follows it, and the fixed,
+non-reflowing overlay. Stale list responses, failed duration/deletion requests
+and successful retries are also covered, with expiry values checked against
+the API. It fails on unexpected script, resource or HTTP errors.
+Screenshots go to `/tmp/labauth-alerts-qa` (override with
+`LABAUTH_SCREENSHOT_DIR`).
+
+## Navigation and asset loading
+
+```bash
+uv run python tests/test_asset_navigation_browser.py
+```
+
+Uses a fresh Chromium profile and disposable database with HTTP caching enabled.
+Checks repeated admin-to-enrolment link navigation, ordinary reloads, history
+back/forward, and reloads of settings, search, and admin display. It verifies
+Lyne controls upgrade, stylesheets load, and enrolment initialises with portrait
+graphics. When a valid local bundle exists, CDN component and stylesheet requests
+are blocked to catch pages bypassing the shared loader. No hard refresh is used.
+
+## Clock hierarchy and alert layout
+
+```bash
+uv run python tests/test_clock_layout_browser.py
+```
+
+Uses a disposable database and fresh Chromium profile. Checks 384 combinations
+on both display channels across six viewport sizes, with greeter, date, digital
+time, summary and sample alerts on/off. Includes five greeting languages and
+light/dark themes. Verifies clock height against the greeting, containment,
+centering, bold digital time, unobscured summary, card fit and browser errors.
+Screenshots and measurements are saved in `/tmp/labauth-clock-layout-qa`.
