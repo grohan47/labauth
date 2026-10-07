@@ -12,9 +12,24 @@ uv run python src/main.py
 Open <http://127.0.0.1:8080/display> in Chromium.
 
 The display loads version-pinned `@sbb-esta/lyne-elements` and
-`@sbb-esta/lyne-design-tokens` npm packages at runtime through jsDelivr. No Lyne
-packages or transitive frontend dependencies are stored in this repository. An
-internet connection is required when loading the UI.
+`@sbb-esta/lyne-design-tokens` through jsDelivr unless a current local bundle
+exists. CDN loading requires internet access on an uncached browser. Browser
+caching alone does not guarantee offline startup.
+
+For offline UI assets:
+
+```bash
+npm install
+npm run build:assets
+```
+
+The generated `src/static/vendor/` bundle includes a manifest of component and
+package versions. The app checks it before selecting local assets; stale or
+incomplete bundles fall back to the pinned CDN imports. Rebuild after changing
+the Lyne version or component list. Generated assets and `node_modules/` are
+ignored by Git. Only the generated bundle is needed at runtime; `node_modules/`
+can be removed after building. If the local bundle is absent, the app uses CDN
+loading.
 
 ## Data and backups
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
+import { createHash } from 'node:crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +43,8 @@ async function bundle() {
     import '@sbb-esta/lyne-elements/checkbox-group.js';
     import '@sbb-esta/lyne-elements/radio-button.js';
     import '@sbb-esta/lyne-elements/radio-button-group.js';
+    import '@sbb-esta/lyne-elements/option.js';
+    import '@sbb-esta/lyne-elements/select.js';
     import '@sbb-esta/lyne-elements/divider.js';
     import '@sbb-esta/lyne-elements/link.js';
     import '@sbb-esta/lyne-elements/menu.js';
@@ -70,6 +73,21 @@ async function bundle() {
 
   fs.copyFileSync(varsCssSrc, path.join(vendorDir, 'sbb-variables.css'));
   fs.copyFileSync(themeCssSrc, path.join(vendorDir, 'standard-theme.css'));
+
+  // The Python loader rejects old or incomplete bundles rather than leaving
+  // pages waiting forever for custom elements that were never registered.
+  const packageVersion = (name) => JSON.parse(fs.readFileSync(
+    path.join(nodeModulesDir, '@sbb-esta', name, 'package.json'), 'utf8',
+  )).version;
+  const manifest = {
+    elements_version: packageVersion('lyne-elements'),
+    tokens_version: packageVersion('lyne-design-tokens'),
+    components: [...entryCode.matchAll(/lyne-elements\/([^']+)\.js/g)].map(match => match[1]),
+    bundle_sha256: createHash('sha256').update(
+      fs.readFileSync(path.join(vendorDir, 'sbb-elements.bundle.js')),
+    ).digest('hex'),
+  };
+  fs.writeFileSync(path.join(vendorDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
   console.log('✓ Successfully generated local SBB assets in src/static/vendor!');
 }

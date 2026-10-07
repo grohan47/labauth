@@ -1,5 +1,6 @@
 from html import escape
 from hashlib import sha256
+import json
 import sys
 from pathlib import Path
 
@@ -28,8 +29,10 @@ LYNE_COMPONENT_MODULES = (
     "logo",
     "menu",
     "notification",
+    "option",
     "radio-button",
     "radio-button-group",
+    "select",
     "signet",
     "title",
 )
@@ -52,16 +55,30 @@ def asset_url(name: str) -> str:
 
 
 def has_vendored_lyne() -> bool:
-    """True when the offline bundle from ``npm run build:assets`` is present."""
+    """Accept only a complete, current offline bundle, not leftover assets."""
     vendor = static_root() / "vendor"
-    return all(
+    if not all(
         (vendor / name).exists()
         for name in (
             "sbb-elements.bundle.js",
             "sbb-variables.css",
             "standard-theme.css",
         )
-    )
+    ):
+        return False
+    try:
+        manifest = json.loads((vendor / "manifest.json").read_text())
+        if not isinstance(manifest, dict):
+            return False
+        return (
+            manifest.get("elements_version") == LYNE_ELEMENTS_VERSION
+            and manifest.get("tokens_version") == LYNE_DESIGN_TOKENS_VERSION
+            and set(manifest.get("components", [])) == set(LYNE_COMPONENT_MODULES)
+            and manifest.get("bundle_sha256")
+            == sha256((vendor / "sbb-elements.bundle.js").read_bytes()).hexdigest()
+        )
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def lyne_assets() -> str:
