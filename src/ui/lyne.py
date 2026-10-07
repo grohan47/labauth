@@ -35,6 +35,8 @@ LYNE_COMPONENT_MODULES = (
     "select",
     "signet",
     "title",
+    "table",
+    "tooltip",
 )
 
 

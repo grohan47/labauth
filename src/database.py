@@ -773,10 +773,13 @@ def set_user_status(user_id: int, status: str) -> Optional[User]:
     return update_user(user_id, status=status)
 
 
-def delete_user(user_id: int) -> bool:
-    with get_db() as db:
-        cur = db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        return cur.rowcount > 0
+def deactivate_user(user_id: int) -> bool:
+    """Retain identity, credentials and history when removing account access.
+
+    Permanent deletion is deliberately absent from the application repository
+    API; an operator must use SQLite directly for that maintenance operation.
+    """
+    return set_user_status(user_id, "inactive") is not None
 
 
 def count_users() -> int:

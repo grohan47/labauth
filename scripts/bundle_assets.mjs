@@ -50,6 +50,8 @@ async function bundle() {
     import '@sbb-esta/lyne-elements/menu.js';
     import '@sbb-esta/lyne-elements/notification.js';
     import '@sbb-esta/lyne-elements/carousel.js';
+    import '@sbb-esta/lyne-elements/table.js';
+    import '@sbb-esta/lyne-elements/tooltip.js';
   `;
 
   console.log('  → Bundling SBB Elements into vendor/sbb-elements.bundle.js...');

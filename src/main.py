@@ -21,6 +21,10 @@ from ui.admin_display import (
 from ui.display import build_display, presence_signature, render_presence_html
 from ui.display_settings import build_display_settings_page
 from ui.enrolment import build_enrolment_page
+from ui.logs import build_logs_page
+from ui.search import build_search_page
+from services.user_queries import search_users, user_details
+from services.log_queries import query_visits, query_sql, database_schema
 from ui.lyne import asset_url, button, container, element, form_field, lyne_assets
 
 SESSION_COOKIE_NAME = "labauth_admin_session"
@@ -423,6 +427,96 @@ async def api_enrolment_complete(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "user": record})
 
 
+@app.get("/api/users/search")
+def api_user_search(request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    try:
+        return JSONResponse(search_users(request.query_params.get("q", ""),
+            limit=int(request.query_params.get("limit", 50)),
+            offset=int(request.query_params.get("offset", 0))))
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=422)
+
+
+@app.get("/api/users/{user_id}")
+def api_user_details(user_id: int, request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    user = user_details(user_id)
+    if user is None:
+        return JSONResponse({"error": "User not found"}, status_code=404)
+    return JSONResponse({"user": user})
+
+
+@app.get("/api/logs")
+def api_logs(request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    try:
+        limit = int(request.query_params.get("limit", 50))
+        offset = int(request.query_params.get("offset", 0))
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("Choose a valid page.")
+        result = query_visits(dict(request.query_params), limit=limit, offset=offset)
+        result["timezone"] = datetime.now().astimezone().strftime('%Z · UTC%z')
+        return JSONResponse(result)
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=422)
+    except Exception:
+        return JSONResponse({"error": "Could not load logs. Try again."}, status_code=503)
+
+
+@app.get("/api/logs/export")
+def api_logs_export(request: Request):
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    import csv
+    import io
+    from starlette.responses import Response
+    try:
+        result = query_visits(dict(request.query_params), limit=10000)
+        if result["total"] > 10000:
+            raise ValueError("Narrow the filters to 10000 visits before exporting.")
+        output = io.StringIO()
+        writer = csv.writer(output)
+        columns = ("visit_id", "user_id", "name", "plaksha_id", "check_in", "check_out", "state", "source", "method", "out_method", "device", "out_device", "duration_seconds")
+        writer.writerow(columns)
+        for row in result["rows"]:
+            # Prevent spreadsheet formula execution when opening an export.
+            values = [row.get(key) for key in columns]
+            writer.writerow(["'" + value if isinstance(value, str) and value.startswith(('=', '+', '-', '@', '\t', '\r', '\n')) else value for value in values])
+        return Response(output.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="labauth-visits.csv"'})
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=422)
+    except Exception:
+        return JSONResponse({"error": "Could not export logs. Try again."}, status_code=503)
+
+
+@app.get("/api/logs/schema")
+def api_logs_schema(request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    return JSONResponse({"tables": database_schema()})
+
+
+@app.post("/api/logs/sql")
+async def api_logs_sql(request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Enter a query.")
+        # Run bounded SQLite work outside the event loop.
+        from starlette.concurrency import run_in_threadpool
+        return JSONResponse(await run_in_threadpool(query_sql, data.get("sql")))
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=422)
+    except Exception:
+        return JSONResponse({"error": "Could not run query. Try again."}, status_code=503)
+
+
 @app.get("/api/time")
 def api_get_time() -> JSONResponse:
     now = datetime.now()
@@ -577,34 +671,7 @@ def display_settings_page(request: Request) -> RedirectResponse | None:
 def logs_page(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
         return RedirectResponse("/admin-display?login=1")
-    ui.add_head_html(f"""
-        <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-        <link rel="stylesheet" href="{asset_url("display.css")}">
-        {lyne_assets()}
-    """)
-    page = element(
-        "main",
-        container(
-            element(
-                "header",
-                element("h1", "Logs.", css_class="admin-heading")
-                + element(
-                    "div",
-                    button("Admin", variant="secondary", href="/admin", size="m", aria_label="Return to administration"),
-                    css_class="admin-header-controls",
-                ),
-                css_class="admin-header",
-            )
-            + element(
-                "div",
-                element("p", "Immutable audit & presence logs (not yet constructed).", style="color: var(--display-muted);"),
-                style="margin-block-start: var(--sbb-spacing-responsive-l);",
-            ),
-            css_class="admin-panel-shell",
-        ),
-        css_class="admin-panel",
-    )
-    ui.html(page, sanitize=False)
+    build_logs_page()
     return None
 
 
@@ -612,43 +679,7 @@ def logs_page(request: Request) -> RedirectResponse | None:
 def search_page(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
         return RedirectResponse("/admin-display?login=1")
-    ui.add_head_html(f"""
-        <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-        <link rel="stylesheet" href="{asset_url("display.css")}">
-        {lyne_assets()}
-        <script type="module" src="{asset_url("search.js")}"></script>
-    """)
-    page = element(
-        "main",
-        container(
-            element(
-                "header",
-                element("h1", "Search.", css_class="admin-heading")
-                + element(
-                    "div",
-                    button("Admin", variant="secondary", href="/admin", size="m", aria_label="Return to administration"),
-                    css_class="admin-header-controls",
-                ),
-                css_class="admin-header",
-            )
-            + element(
-                "div",
-                form_field(
-                    label="Search enrolled users by name",
-                    input_id="search-user-input",
-                    size="m",
-                    width="default",
-                    floating_label=True,
-                    input_attrs={"type": "search", "placeholder": "Type a name...", "autocomplete": "off"},
-                )
-                + element("div", "", id="search-results-list", style="margin-block-start: var(--sbb-spacing-fixed-4x);"),
-                style="margin-block-start: var(--sbb-spacing-responsive-l); max-width: 32rem;",
-            ),
-            css_class="admin-panel-shell",
-        ),
-        css_class="admin-panel",
-    )
-    ui.html(page, sanitize=False)
+    build_search_page()
     return None
 
 
