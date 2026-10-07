@@ -1232,15 +1232,17 @@ sbb-icon.alert-bar-icon {
 .configured-display .display-intro { display: block; }
 .configured-display .display-greeting {
   position: absolute; top: var(--greeting-midpoint, 50%); transform: translateY(-50%);
-  overflow-wrap: anywhere; font-size: clamp(3.25rem, 4.5vw, 4.75rem);
-  --sbb-title-font-size: clamp(3.25rem, 4.5vw, 4.75rem);
+  overflow-wrap: anywhere; font-size: var(--greeting-font-size, clamp(3.25rem, 4.5vw, 4.75rem));
+  --sbb-title-font-size: var(--greeting-font-size, clamp(3.25rem, 4.5vw, 4.75rem));
 }
 .configured-display .time-panel { display: flex; align-items: flex-end; justify-content: flex-start; }
+.configured-display.clock-fills-slot .time-panel { align-items: center; justify-content: center; }
 .configured-display .clock-stack { width: auto; max-width: 100%; height: auto; gap: 0; padding: 0; }
 .configured-display .clock-stack sbb-clock {
   display: block; line-height: 0; flex: none;
   width: var(--display-clock-size); height: var(--display-clock-size);
 }
+.configured-display .digital-time { font-size: calc(var(--sbb-heading-font-size-2) * 0.9); }
 .configured-display .current-presence { position: relative; }
 .configured-display.summary-below-greeter .current-presence > div:has(> .display-summary) {
   position: absolute; top: var(--summary-y); left: 0; right: 0; z-index: 1;
@@ -1306,7 +1308,15 @@ sbb-icon.alert-bar-icon {
 }
 .outline-admin-bar { flex: 0 0 5%; border: var(--outline-stroke) solid var(--sbb-color-red); }
 .outline-header { display: flex; flex: 0 0 var(--header-size, 30%); min-height: 0; gap: var(--sbb-spacing-fixed-2x); align-items: center; }
-.outline-greeter { flex: 1; height: 4px; background: var(--sbb-color-red); }
+.outline-greeter {
+  font-family: "Helvetica Neue Bold", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: clamp(1.25rem, 4vw, 3.25rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: transparent;
+  -webkit-text-stroke: 1px var(--sbb-color-red);
+}
 .outline-clock-stack { display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; flex: 0 0 18%; }
 .outline-date, .outline-time { width: 65%; flex: 0 0 4%; border: var(--outline-stroke) solid var(--sbb-color-red); }
 .outline-clock { flex: 1; height: 0; aspect-ratio: 1; border: var(--outline-stroke) solid var(--sbb-color-red); border-radius: 50%; }

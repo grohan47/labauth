@@ -409,6 +409,7 @@ function applyDisplaySettings(cfg, html) {
   frame.querySelector('.display-header').hidden = !hasHeader;
   frame.querySelector('.time-panel').hidden = !timeUnits;
   frame.classList.toggle('display-frame--no-header', !hasHeader);
+  frame.classList.toggle('clock-fills-slot', cfg.show_clock);
   for (const [flag, cls] of [['show_names', 'hide-names'], ['show_check_in', 'hide-check-in'], ['show_photos', 'hide-photos'], ['show_tools', 'hide-tools']]) frame.classList.toggle(cls, !cfg[flag]);
   const chrome = document.querySelector('.admin-titlebar');
   if (chrome) chrome.hidden = false;
@@ -444,13 +445,30 @@ function layoutConfiguredCards() {
   const hasTime = cfg.show_date || cfg.show_clock || cfg.show_digital_time;
   const hasHeader = hasGreeting || hasTime;
   // Measure the complete greeting, including wrapped lines and the active font.
-  // Card fitting may reduce the clock's preferred size, but never this floor.
-  const greetingHeight = hasGreeting ? Math.ceil(document.querySelector('#display-greeting').getBoundingClientRect().height) : 0;
-  const minimumClockSize = Math.max(64, greetingHeight);
-  const preferredClockSize = Math.max(144, minimumClockSize);
   const minWidth = cfg.show_photos || cfg.show_tools ? 240 : 180;
   const preferredColumns = hasHeader ? 4 : Math.max(4, Math.floor(width / 300));
   const columns = Math.max(1, Math.min(Math.max(cards.length, 1), preferredColumns, layoutColumnLimit, Math.floor((width + gap) / (minWidth + gap))));
+  // Measure wrapped greetings at the final slot width, before budgeting rows.
+  const columnWidth = (width - gap * (columns - 1)) / columns;
+  const timeWidth = columns === 1 && hasGreeting && hasTime ? columnWidth / 2 : columnWidth;
+  const greeting = document.querySelector('#display-greeting');
+  if (hasGreeting) {
+    const intro = document.querySelector('.display-intro');
+    intro.style.width = `${columns === 1 && hasTime ? columnWidth / 2 : columnWidth * Math.max(1, columns - 1) + gap * Math.max(0, columns - 2)}px`;
+    let fontSize = Math.max(52, Math.min(76, window.innerWidth * 0.045));
+    intro.style.setProperty('--greeting-font-size', `${fontSize}px`);
+    // A narrow slot must still leave the face at least as tall as the greeting.
+    for (let attempt = 0; cfg.show_clock && attempt < 4; attempt++) {
+      const measured = greeting.getBoundingClientRect().height;
+      if (measured * 1.08 <= Math.floor(timeWidth)) break;
+      fontSize *= Math.floor(timeWidth) / (measured * 1.08) * 0.98;
+      intro.style.setProperty('--greeting-font-size', `${fontSize}px`);
+    }
+  }
+  const greetingHeight = hasGreeting ? Math.ceil(greeting.getBoundingClientRect().height) : 0;
+  const viewportClockSize = Math.floor(Math.min(timeWidth, Math.max(128, Math.min(240, width * 0.14, height * 0.24))));
+  const minimumClockSize = Math.max(Math.ceil(greetingHeight * 1.08), viewportClockSize);
+  const preferredClockSize = minimumClockSize;
   const reserved = columns === 1 && hasGreeting && hasTime ? 1 : (hasGreeting ? Math.max(1, columns - 1) : 0) + (hasTime ? 1 : 0);
   const fullHeader = reserved >= columns;
   const summary = document.querySelector('.display-summary');
@@ -529,12 +547,21 @@ function layoutConfiguredCards() {
     if (slot && node) {
       const rect = slot.getBoundingClientRect();
       const split = columns === 1 && hasGreeting && hasTime;
-      const headingOffset = !hasGreeting && selector === '.time-panel' ? summaryHeight : 0;
-      Object.assign(node.style, {left: `${rect.left - frameRect.left + (split && selector === '.time-panel' ? rect.width / 2 : 0)}px`, top: `${rect.top - frameRect.top - headingOffset}px`, width: `${split ? rect.width / 2 : rect.width}px`, height: `${rect.height - summaryReservation + headingOffset}px`});
+      Object.assign(node.style, {left: `${rect.left - frameRect.left + (split && selector === '.time-panel' ? rect.width / 2 : 0)}px`, top: `${rect.top - frameRect.top}px`, width: `${split ? rect.width / 2 : rect.width}px`, height: `${rect.height - summaryReservation}px`});
     }
   }
-  const timeSpace = sizes[0] - summaryReservation;
-  frame.style.setProperty('--display-clock-size', `${Math.max(minimumClockSize, Math.min(preferredClockSize, timeSpace - dateHeight - digitalHeight - 4))}px`);
+  let clockSize = preferredClockSize;
+  if (cfg.show_clock) {
+    const panel = frame.querySelector('.time-panel');
+    // Fit the face into its actual cell, leaving room for the enabled date,
+    // digital time, and the clock's native bottom margin.
+    const clock = panel.querySelector('sbb-clock');
+    const clockMargin = Number.parseFloat(getComputedStyle(clock).marginBottom) || 0;
+    clockSize = Math.max(0, Math.floor(Math.min(panel.clientWidth,
+      panel.clientHeight - dateHeight - digitalHeight - clockMargin)));
+    clockSize = Math.max(minimumClockSize, clockSize);
+  }
+  frame.style.setProperty('--display-clock-size', `${clockSize}px`);
   if (hasGreeting) {
     const intro = frame.querySelector('.display-intro');
     const clock = frame.querySelector('sbb-clock');
