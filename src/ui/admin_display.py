@@ -4,7 +4,20 @@ import time
 
 from nicegui import ui
 
-from ui.lyne import asset_url, lyne_assets
+import database as db
+from ui.lyne import (
+    asset_url,
+    button,
+    card,
+    card_button,
+    card_link,
+    container,
+    element,
+    form_field,
+    icon,
+    lyne_assets,
+    select,
+)
 
 DEFAULT_ADMIN_PASSWORD = "labauth@2026"
 SESSION_MAX_AGE_SECONDS = 3600.0  # 1 hour active session
@@ -58,7 +71,11 @@ const ADMIN_ICONS = {
     'exit-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M3.5 4H3v16h13v-3h-1v2H4V5h11v2h1V4H3.5m14.212 5.005 3.142 3.141.353.354-.353.353-3.142 3.15-.707-.707L19.295 13H7v-1h12.293l-2.288-2.287z" clip-rule="evenodd"/></svg>',
     'cross-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="m12.707 12 5.647-5.647-.707-.707L12 11.293 6.354 5.646l-.708.707L11.293 12l-5.647 5.646.708.707L12 12.707l5.647 5.646.707-.707z" clip-rule="evenodd"/></svg>',
     'controls-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="currentColor" fill-rule="evenodd" d="M4 8h8v1H4zm12 0h16v1H16zm-5-3h2v7h-2zm-7 11h16v1H4zm20 0h8v1h-8zm-5-3h2v7h-2zm-15 11h6v1H4zm10 0h18v1H14zm-5-3h2v7H9z" clip-rule="evenodd"/></svg>',
-    'controls-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M3 5h5v1H3zm9 0h9v1h-9zm-5-2h2v5H7zm-4 8h11v1H3zm15 0h3v1h-3zm-5-2h2v5h-2zM3 17h3v1H3zm7 0h11v1H10zm-5-2h2v5H5z" clip-rule="evenodd"/></svg>'
+    'controls-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M3 5h5v1H3zm9 0h9v1h-9zm-5-2h2v5H7zm-4 8h11v1H3zm15 0h3v1h-3zm-5-2h2v5h-2zM3 17h3v1H3zm7 0h11v1H10zm-5-2h2v5H5z" clip-rule="evenodd"/></svg>',
+    'pen-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="m17.353 4.356-.354-.353-.353.353-2.29 2.29-.353.354.353.353 2.29 2.29.355.355.353-.355 2.29-2.3.353-.353-.354-.353zM15.417 7l1.584-1.584 1.582 1.576-1.584 1.59zm-2.063 1.357L13 8.003l-.354.354-7.5 7.5-.146.146V19h2.997l.147-.146 7.5-7.501.353-.354-.354-.353zM6 16.417l7-7L14.583 11l-7 7.001H6z" clip-rule="evenodd"/></svg>',
+    'trash-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M8.272 5.009A4.47 4.47 0 0 1 12 3c1.564 0 2.925.806 3.727 2.009H20v1h-1V20H5V6.009H4v-1zm1.289 0h4.878a3.45 3.45 0 0 0-4.878 0M6 6.009V19h12V6.009zM8 8v9h1V8zm3.5 9V8h1v9zM15 8v9h1V8z" clip-rule="evenodd"/></svg>',
+    'clock-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M5 12a7 7 0 1 1 14 0 7 7 0 0 1-14 0m7-8a8 8 0 1 0 0 16 8 8 0 0 0 0-16m0 3v5h5v1h-6V7z" clip-rule="evenodd"/></svg>',
+    'tick-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="m19.353 7.363-9 8.99-.353.354-.354-.354-4-4 .708-.707L10 15.293l8.647-8.637z" clip-rule="evenodd"/></svg>'
 };
 
 globalThis.sbbConfig = globalThis.sbbConfig || {};
@@ -74,45 +91,68 @@ globalThis.sbbConfig.icon.interceptor = function(context) {
 
 def admin_chrome() -> str:
     """Return the Lyne-only controls which distinguish the admin display."""
-    return """
-        <sbb-header class="admin-titlebar" expanded size="s">
-            <sbb-header-link class="admin-brand" href="/admin-display" aria-label="LabAuth admin display">
-                <span class="admin-brand__content">
-                    <span class="admin-brand__name">LabAuth</span>
-                    <svg class="admin-brand__logo" viewBox="0 0 59.233 20.603" xmlns="http://www.w3.org/2000/svg" aria-label="SBB" role="img" focusable="false">
-                        <path d="M0 0h59.233v20.603H0V0z" fill="#EC0000"/>
-                        <path d="M35.186 17.02h3.75l-5.047-5.163h6.265v5.163h2.96v-5.163h6.267l-5.05 5.163h3.752l6.427-6.708-6.426-6.73h-3.752l5.05 5.185h-6.266V3.583h-2.96v5.184h-6.267l5.047-5.184h-3.75l-6.43 6.73 6.43 6.707" fill="#FFF"/>
-                    </svg>
-                </span>
-            </sbb-header-link>
-            <div class="sbb-header-spacer"></div>
-            <sbb-header-button id="admin-access-button" type="button">
-                <svg slot="icon" class="admin-access-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 9.5c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5v.5H5v-.5Z"></path>
-                </svg>
-                Admin
-            </sbb-header-button>
-        </sbb-header>
-
-        <sbb-dialog id="admin-password-dialog" backdrop="translucent" backdrop-action="close">
-            <sbb-dialog-title>Admin access</sbb-dialog-title>
-            <sbb-dialog-close-button id="admin-dialog-close" aria-label="Close dialog"></sbb-dialog-close-button>
-            <sbb-dialog-content>
-                <form id="admin-password-form" novalidate>
-                    <p class="admin-dialog__intro">Enter the admin password to continue.</p>
-                    <sbb-form-field size="m" width="default" floating-label class="admin-password-field">
-                        <label for="admin-password-input">Password</label>
-                        <input id="admin-password-input" name="password" type="password" autocomplete="current-password" required>
-                        <sbb-error id="admin-password-error" slot="error" hidden></sbb-error>
-                    </sbb-form-field>
-                </form>
-            </sbb-dialog-content>
-            <sbb-dialog-actions>
-                <sbb-secondary-button id="admin-password-cancel" type="button">Cancel</sbb-secondary-button>
-                <sbb-button id="admin-password-submit" type="submit" form="admin-password-form">Continue</sbb-button>
-            </sbb-dialog-actions>
-        </sbb-dialog>
-    """
+    brand_logo = (
+        '<svg class="admin-brand__logo" viewBox="0 0 59.233 20.603" '
+        'xmlns="http://www.w3.org/2000/svg" aria-label="SBB" role="img" focusable="false">'
+        '<path d="M0 0h59.233v20.603H0V0z" fill="#EC0000"/>'
+        '<path d="M35.186 17.02h3.75l-5.047-5.163h6.265v5.163h2.96v-5.163h6.267l-5.05 5.163h3.752'
+        'l6.427-6.708-6.426-6.73h-3.752l5.05 5.185h-6.266V3.583h-2.96v5.184h-6.267l5.047-5.184h-3.75'
+        'l-6.43 6.73 6.43 6.707" fill="#FFF"/></svg>'
+    )
+    header = element(
+        "sbb-header",
+        element(
+            "sbb-header-link",
+            '<span class="admin-brand__content"><span class="admin-brand__name">LabAuth</span>'
+            f"{brand_logo}</span>",
+            css_class="admin-brand",
+            href="/admin-display",
+            aria_label="LabAuth admin display",
+        )
+        + '<div class="sbb-header-spacer"></div>'
+        + element(
+            "sbb-header-button",
+            '<svg slot="icon" class="admin-access-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+            '<path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 9.5c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5v.5H5v-.5Z"></path>'
+            "</svg>Admin",
+            id="admin-access-button",
+            type="button",
+        ),
+        css_class="admin-titlebar",
+        expanded=True,
+        size="s",
+    )
+    password_form = element(
+        "form",
+        '<p class="admin-dialog__intro">Enter the admin password to continue.</p>'
+        + form_field(
+            label="Password",
+            input_id="admin-password-input",
+            size="m",
+            width="default",
+            floating_label=True,
+            css_class="admin-password-field",
+            input_attrs={"name": "password", "type": "password", "autocomplete": "current-password", "required": True},
+            content=element("sbb-error", "", id="admin-password-error", slot="error", hidden=True),
+        ),
+        id="admin-password-form",
+        novalidate=True,
+    )
+    dialog = element(
+        "sbb-dialog",
+        element("sbb-dialog-title", "Admin access")
+        + element("sbb-dialog-close-button", "", id="admin-dialog-close", aria_label="Close dialog")
+        + element("sbb-dialog-content", password_form)
+        + element(
+            "sbb-dialog-actions",
+            button("Cancel", variant="secondary", html_id="admin-password-cancel", type_="button")
+            + button("Continue", html_id="admin-password-submit", type_="submit", form="admin-password-form"),
+        ),
+        id="admin-password-dialog",
+        backdrop="translucent",
+        backdrop_action="close",
+    )
+    return header + dialog
 
 
 def build_admin_display() -> None:
@@ -139,235 +179,124 @@ def build_admin_panel() -> None:
             {ADMIN_ICONS_JS}
         </script>
         {lyne_assets()}
+        <script type="module" src="{asset_url("admin-panel.js")}"></script>
     """)
 
-    admin_markup = f"""
-        <main class="admin-panel" data-theme="{current_theme}">
-            <sbb-container color="transparent" expanded class="admin-panel-shell">
-                <!-- Top Header: Left 'Admin.', Right Exit button & isolated pure SBB clock -->
-                <header class="admin-header">
-                    <h1 class="admin-heading">Admin.</h1>
-                    <div class="admin-header-controls">
-                        <sbb-secondary-button id="admin-exit-btn" size="m" aria-label="Exit admin panel">
-                            <sbb-icon slot="icon" name="exit-small"></sbb-icon>
-                            Exit
-                        </sbb-secondary-button>
-                        <div class="admin-clock-wrapper" aria-label="Analogue clock">
-                            <sbb-clock></sbb-clock>
-                        </div>
-                    </div>
-                </header>
+    def admin_card(label, *, icon_name, href=None, card_id="", action_id=""):
+        action = card_link(label, href=href) if href else card_button(label, html_id=action_id)
+        inner = element(
+            "div",
+            icon(icon_name, css_class="admin-card-icon")
+            + element("span", label, css_class="admin-card-label"),
+            css_class="admin-card-inner",
+        )
+        return card(action + inner, css_class="admin-card", html_id=card_id)
 
-                <!-- Grid: 4 large rectangular Lyne cards arranged in a 4x4 coordinate space -->
-                <div class="admin-cards-grid">
-                    <!-- 1. Enrollment: leads to /enrollment -->
-                    <sbb-card color="transparent-bordered" class="admin-card">
-                        <sbb-card-link href="/enrollment">Enrollment</sbb-card-link>
-                        <div class="admin-card-inner">
-                            <sbb-icon name="fingerprint-medium" class="admin-card-icon"></sbb-icon>
-                            <span class="admin-card-label">Enrollment</span>
-                        </div>
-                    </sbb-card>
-
-                    <!-- 2. Logs: redirects to /logs -->
-                    <sbb-card color="transparent-bordered" class="admin-card">
-                        <sbb-card-link href="/logs">Logs</sbb-card-link>
-                        <div class="admin-card-inner">
-                            <sbb-icon name="document-text-medium" class="admin-card-icon"></sbb-icon>
-                            <span class="admin-card-label">Logs</span>
-                        </div>
-                    </sbb-card>
-
-                    <!-- 3. Search: search by name in /search -->
-                    <sbb-card color="transparent-bordered" class="admin-card">
-                        <sbb-card-link href="/search">Search</sbb-card-link>
-                        <div class="admin-card-inner">
-                            <sbb-icon name="magnifying-glass-medium" class="admin-card-icon"></sbb-icon>
-                            <span class="admin-card-label">Search</span>
-                        </div>
-                    </sbb-card>
-
-                    <!-- 4. Alerts: caution symbol, opens alert dialog to type alerts for /display -->
-                    <sbb-card color="transparent-bordered" class="admin-card" id="admin-card-alerts">
-                        <sbb-card-button id="admin-alerts-open-btn">Alerts</sbb-card-button>
-                        <div class="admin-card-inner">
-                            <sbb-icon name="sign-exclamation-point-medium" class="admin-card-icon"></sbb-icon>
-                            <span class="admin-card-label">Alerts</span>
-                        </div>
-                    </sbb-card>
-
-                    <!-- 5. Display Settings: customize layout and visibility for displays -->
-                    <sbb-card color="transparent-bordered" class="admin-card" id="admin-card-display-settings">
-                        <sbb-card-link href="/admin/display-settings">Display settings</sbb-card-link>
-                        <div class="admin-card-inner">
-                            <sbb-icon name="controls-medium" class="admin-card-icon"></sbb-icon>
-                            <span class="admin-card-label">Display settings</span>
-                        </div>
-                    </sbb-card>
-                </div>
-            </sbb-container>
-
-            <!-- Alerts Dialog: Place for admins to type alerts displayed on /display -->
-            <sbb-dialog id="admin-alerts-dialog" trigger="admin-alerts-open-btn" backdrop="translucent" backdrop-action="close">
-                <sbb-dialog-title>Lab Alerts</sbb-dialog-title>
-                <sbb-dialog-close-button id="admin-alerts-close" aria-label="Close dialog"></sbb-dialog-close-button>
-                <sbb-dialog-content>
-                    <form id="admin-alerts-form" novalidate>
-                        <p class="admin-dialog__intro">Enter an announcement or safety alert to display in the lab.</p>
-                        <sbb-form-field size="m" width="default" floating-label class="admin-alert-field">
-                            <label for="admin-alert-input">Alert message</label>
-                            <input id="admin-alert-input" name="alert" type="text" placeholder="e.g. Laser cutter maintenance in progress" autocomplete="off">
-                        </sbb-form-field>
-                        <div id="admin-active-alert-status" class="admin-active-alert-status" hidden>
-                            <span class="admin-alert-status-label">Active:</span>
-                            <span id="admin-active-alert-text"></span>
-                        </div>
-                    </form>
-                </sbb-dialog-content>
-                <sbb-dialog-actions>
-                    <sbb-secondary-button id="admin-alerts-clear" type="button">Clear alert</sbb-secondary-button>
-                    <sbb-button id="admin-alerts-submit" type="submit" form="admin-alerts-form">Broadcast</sbb-button>
-                </sbb-dialog-actions>
-            </sbb-dialog>
-        </main>
-    """
-
-    admin_script = """
-        function initAdminPanel() {
-            const exitBtn = document.querySelector('#admin-exit-btn');
-            const alertsCard = document.querySelector('#admin-card-alerts');
-            const alertsBtn = document.querySelector('#admin-alerts-open-btn');
-            const alertsDialog = document.querySelector('#admin-alerts-dialog');
-            const alertsClose = document.querySelector('#admin-alerts-close');
-            const alertsForm = document.querySelector('#admin-alerts-form');
-            const alertsInput = document.querySelector('#admin-alert-input');
-            const alertsClear = document.querySelector('#admin-alerts-clear');
-            const alertsSubmit = document.querySelector('#admin-alerts-submit');
-            const statusWrap = document.querySelector('#admin-active-alert-status');
-            const statusText = document.querySelector('#admin-active-alert-text');
-
-            if (!exitBtn || !alertsCard || !alertsDialog) {
-                window.requestAnimationFrame(initAdminPanel);
-                return;
-            }
-
-            exitBtn.addEventListener('click', async () => {
-                try {
-                    await fetch('/api/admin/logout', { method: 'POST' });
-                } catch (e) {
-                    console.error('Logout error', e);
-                } finally {
-                    window.location.assign('/admin-display');
-                }
-            });
-
-            const loadAlert = async () => {
-                try {
-                    const res = await fetch('/api/alerts');
-                    if (res.ok) {
-                        const data = await res.json();
-                        const current = data.alert || '';
-                        if (alertsInput) alertsInput.value = current;
-                        if (statusText && statusWrap) {
-                            if (current) {
-                                statusText.textContent = current;
-                                statusWrap.hidden = false;
-                            } else {
-                                statusWrap.hidden = true;
-                            }
-                        }
-                    }
-                } catch (e) {}
-            };
-
-            const openAlerts = () => {
-                loadAlert();
-                if (alertsDialog) {
-                    if (typeof alertsDialog.open === 'function') {
-                        alertsDialog.open();
-                    } else if (alertsDialog.showModal) {
-                        alertsDialog.showModal();
-                    }
-                }
-                setTimeout(() => alertsInput && alertsInput.focus(), 100);
-            };
-
-            const closeAlerts = () => {
-                if (alertsDialog) {
-                    if (typeof alertsDialog.close === 'function') {
-                        alertsDialog.close();
-                    }
-                }
-            };
-
-            alertsCard.addEventListener('click', (e) => {
-                openAlerts();
-            });
-
-            if (alertsBtn) {
-                alertsBtn.addEventListener('click', (e) => {
-                    openAlerts();
-                });
-            }
-
-            if (alertsClose) {
-                alertsClose.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    closeAlerts();
-                });
-            }
-
-            alertsDialog.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') {
-                    e.preventDefault();
-                    closeAlerts();
-                }
-            });
-
-            if (alertsForm) {
-                alertsForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const val = (alertsInput ? alertsInput.value : '').trim();
-                    try {
-                        if (alertsSubmit) alertsSubmit.loading = true;
-                        await fetch('/api/alerts', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ alert: val }),
-                        });
-                        closeAlerts();
-                    } catch (err) {
-                        console.error('Error broadcasting alert', err);
-                    } finally {
-                        if (alertsSubmit) alertsSubmit.loading = false;
-                    }
-                });
-            }
-
-            if (alertsClear) {
-                alertsClear.addEventListener('click', async () => {
-                    try {
-                        alertsClear.loading = true;
-                        await fetch('/api/alerts', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ alert: '' }),
-                        });
-                        if (alertsInput) alertsInput.value = '';
-                        if (statusWrap) statusWrap.hidden = true;
-                        closeAlerts();
-                    } catch (err) {
-                        console.error('Error clearing alert', err);
-                    } finally {
-                        alertsClear.loading = false;
-                    }
-                });
-            }
-        }
-
-        initAdminPanel();
-    """
-
+    cards = "".join((
+        admin_card("Enrollment", icon_name="fingerprint-medium", href="/enrollment"),
+        admin_card("Logs", icon_name="document-text-medium", href="/logs"),
+        admin_card("Search", icon_name="magnifying-glass-medium", href="/search"),
+        admin_card(
+            "Alerts",
+            icon_name="sign-exclamation-point-medium",
+            card_id="admin-card-alerts",
+            action_id="admin-alerts-open-btn",
+        ),
+        admin_card(
+            "Display settings",
+            icon_name="controls-medium",
+            href="/admin/display-settings",
+            card_id="admin-card-display-settings",
+        ),
+    ))
+    header = element(
+        "header",
+        element("h1", "Admin.", css_class="admin-heading")
+        + element(
+            "div",
+            button(
+                "Exit",
+                variant="secondary",
+                html_id="admin-exit-btn",
+                size="m",
+                aria_label="Exit admin panel",
+                slot_icon="exit-small",
+            )
+            + element("div", element("sbb-clock"), css_class="admin-clock-wrapper", aria_label="Analogue clock"),
+            css_class="admin-header-controls",
+        ),
+        css_class="admin-header",
+    )
+    alert_severity_options = (("critical", "Critical"), ("caution", "Caution"), ("info", "Info"))
+    composer = element(
+        "form",
+        form_field(
+            label="New alert",
+            input_id="admin-alert-input",
+            size="m",
+            width="default",
+            floating_label=True,
+            css_class="admin-alert-field",
+            input_attrs={
+                "name": "message",
+                "type": "text",
+                "placeholder": "Type an alert",
+                "autocomplete": "off",
+                "maxlength": db.ALERT_MAX_LENGTH,
+            },
+        )
+        + element(
+            "sbb-form-field",
+            element("label", "Severity", **{"for": "admin-alert-severity"})
+            + select(
+                name="severity",
+                options=alert_severity_options,
+                value="info",
+                size="m",
+                html_id="admin-alert-severity",
+                aria_label="Severity",
+            ),
+            size="m",
+            width="default",
+            floating_label=True,
+            css_class="admin-alert-severity-field",
+        )
+        + button("Add", html_id="admin-alerts-submit", type_="submit", size="m"),
+        id="admin-alerts-form",
+        novalidate=True,
+        css_class="admin-alert-composer",
+    )
+    alerts_list = element(
+        "div",
+        "",
+        id="admin-alerts-list",
+        css_class="admin-alerts-list",
+        role="list",
+        aria_live="polite",
+    )
+    alerts_dialog = element(
+        "sbb-dialog",
+        element("sbb-dialog-title", "Lab alerts")
+        + element("sbb-dialog-close-button", "", id="admin-alerts-close", aria_label="Close dialog")
+        + element(
+            "sbb-dialog-content",
+            element("p", "", id="admin-alerts-error", css_class="admin-alerts-error", role="alert", hidden=True)
+            + composer
+            + alerts_list,
+        ),
+        id="admin-alerts-dialog",
+        trigger="admin-alerts-open-btn",
+        backdrop="translucent",
+        backdrop_action="close",
+    )
+    admin_markup = element(
+        "main",
+        container(
+            header + element("div", cards, css_class="admin-cards-grid") + alerts_dialog,
+            expanded=True,
+            css_class="admin-panel-shell",
+        ),
+        css_class="admin-panel",
+        data_theme=current_theme,
+    )
     ui.html(admin_markup, sanitize=False).classes("w-full h-full admin-panel-host")
-    ui.add_body_html(f"<script>{admin_script}</script>")

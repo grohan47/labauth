@@ -122,6 +122,16 @@ POSTGRES_SCHEMA: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS alerts (
+        id           BIGINT PRIMARY KEY,
+        message      TEXT,
+        severity     TEXT,
+        expires_at   TEXT,
+        created_at   TEXT,
+        updated_at   TEXT
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS backup_runs (
         id           BIGINT PRIMARY KEY,
         started_at   TEXT,

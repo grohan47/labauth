@@ -589,14 +589,25 @@ function layoutConfiguredCards() {
     });
   });
 }
+let configuredLayoutPending = false;
+function scheduleConfiguredLayout() {
+  if (configuredLayoutPending) return;
+  configuredLayoutPending = true;
+  requestAnimationFrame(() => {
+    configuredLayoutPending = false;
+    layoutConfiguredCards();
+  });
+}
+
 function initializeConfiguredDisplay() {
   const frame = document.querySelector('.display-frame');
   applyDisplaySettings(JSON.parse(frame.dataset.settings));
   const wrapper = document.querySelector('.presence-content-wrapper');
-  new ResizeObserver(layoutConfiguredCards).observe(wrapper);
+  new ResizeObserver(scheduleConfiguredLayout).observe(wrapper);
+  new ResizeObserver(reserveAlertSpace).observe(document.querySelector('#alert-ticker'));
   // Zoom, font loading and greeting-language changes can alter its height even
   // when the card area's dimensions stay the same.
-  new ResizeObserver(layoutConfiguredCards).observe(frame.querySelector('#display-greeting'));
+  new ResizeObserver(scheduleConfiguredLayout).observe(frame.querySelector('#display-greeting'));
   new MutationObserver(() => { if (wrapper.querySelector('.configured-cards')) { layoutKey = ''; layoutContext = ''; layoutConfiguredCards(); } }).observe(wrapper, {childList: true, subtree: true});
   Promise.all(['sbb-card', 'sbb-title', 'sbb-chip-label', 'sbb-image', 'sbb-clock'].map(tag => customElements.whenDefined(tag))).then(() => { layoutKey = ''; layoutConfiguredCards(); });
   document.fonts.ready.then(() => { layoutKey = ''; layoutConfiguredCards(); });
@@ -798,6 +809,176 @@ window.showAuthAlert = handleAuthEvent;
 window.getAlertQueue = () => alertQueue;
 window.pollAuthEvents = pollAuthEvents;
 
+// --- Operator alerts: single-line ticker at the top of the screen ----------
+//
+// Active alerts are ordered by severity (critical, caution, info) and shown one
+// at a time. Each alert cross-fades into the next. A message too long for one
+// line wraps and is revealed one line at a time, pausing on each so it can be
+// read. A lone alert is shown once and left in place (no needless flashing).
+let alertTickerItems = [];
+let alertTickerKey = '';
+let alertTickerGeneration = 0;
+let alertTickerAnimation = null;
+
+const ALERT_TICKER_RANKS = { critical: 0, caution: 1, info: 2 };
+const ALERT_TICKER_ICONS = {
+  critical:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M3 12a9 9 0 1 1 18 0 9 9 0 0 1-18 0m9-10C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2m.5 4v7h-1V6zm-1 11v-2h1v2z" clip-rule="evenodd"/></svg>',
+  caution:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="m11.5 1.877.448.9 8.7 17.5.36.723H1.992l.36-.723 8.7-17.5zM3.607 20h15.786L11.5 4.123zM11 18v-2h1v2zm1-4V8h-1v6z" clip-rule="evenodd"/></svg>',
+  info:
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M3 12c0-5.03 3.972-9 9-9s9 3.97 9 9c0 5.028-3.972 9-9 9s-9-3.972-9-9m9-10C6.42 2 2 6.418 2 12c0 5.58 4.42 10 10 10s10-4.42 10-10c0-5.582-4.42-10-10-10m.98 6V6h-1v2zm0 7.99h2v1h-5v-1h2v-5H10v-1h2.98v6" clip-rule="evenodd"/></svg>',
+};
+
+function alertTickerRank(severity) {
+  return Object.prototype.hasOwnProperty.call(ALERT_TICKER_RANKS, severity)
+    ? ALERT_TICKER_RANKS[severity]
+    : 3;
+}
+
+function waitForAlert(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cancelTickerAnimation(textEl) {
+  if (alertTickerAnimation) {
+    try {
+      alertTickerAnimation.cancel();
+    } catch (err) {
+      // Already finished.
+    }
+    alertTickerAnimation = null;
+  }
+  if (textEl) textEl.style.transform = 'translateY(0)';
+}
+
+function setAlerts(list) {
+  const normalized = (Array.isArray(list) ? list : [])
+    .filter((alert) => alert && alert.message)
+    .map((alert) => ({
+      id: alert.id,
+      message: String(alert.message),
+      severity: Object.prototype.hasOwnProperty.call(ALERT_TICKER_RANKS, alert.severity)
+        ? alert.severity
+        : 'info',
+      created_at: alert.created_at || '',
+    }));
+  normalized.sort(
+    (a, b) =>
+      alertTickerRank(a.severity) - alertTickerRank(b.severity) ||
+      String(a.created_at).localeCompare(String(b.created_at)),
+  );
+  const key = JSON.stringify(normalized.map((a) => [a.id, a.message, a.severity]));
+  if (key === alertTickerKey) return;
+  alertTickerKey = key;
+  alertTickerItems = normalized;
+  alertTickerGeneration += 1;
+  runAlertTicker(alertTickerGeneration);
+}
+
+window.setAlerts = setAlerts;
+window.getAlerts = () => alertTickerItems;
+
+async function presentTickerAlert(band, alert, generation) {
+  const severityEl = band.querySelector('.alert-ticker__severity');
+  const textEl = band.querySelector('.alert-ticker__text');
+  const viewport = band.querySelector('.alert-ticker__viewport');
+  if (!severityEl || !textEl || !viewport) return;
+
+  band.classList.remove('is-visible');
+  await waitForAlert(300);
+  if (alertTickerGeneration !== generation) return;
+
+  cancelTickerAnimation(textEl);
+  band.className = `alert-ticker alert-ticker--${alert.severity}`;
+  severityEl.innerHTML = ALERT_TICKER_ICONS[alert.severity] || '';
+  textEl.textContent = alert.message;
+  textEl.style.transform = 'translateY(0)';
+
+  void band.offsetHeight;
+  band.classList.add('is-visible');
+  await waitForAlert(350);
+  if (alertTickerGeneration !== generation) return;
+
+  const lineHeight = viewport.clientHeight || 1;
+  const lines = Math.max(1, Math.round(textEl.scrollHeight / lineHeight));
+  // Standardised reading holds: 7s for a single line, 5s per line otherwise.
+  const hold = lines > 1 ? 5_000 : 7_000;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Hold the first line before scrolling, then hold each subsequent line after
+  // it slides in, so every line gets the same reading time.
+  await waitForAlert(hold);
+  if (alertTickerGeneration !== generation) return;
+
+  for (let line = 1; line < lines; line += 1) {
+    const from = -(line - 1) * lineHeight;
+    const to = -line * lineHeight;
+    if (reducedMotion) {
+      textEl.style.transform = `translateY(${to}px)`;
+    } else {
+      cancelTickerAnimation(null);
+      textEl.style.transform = `translateY(${from}px)`;
+      alertTickerAnimation = textEl.animate(
+        [{ transform: `translateY(${from}px)` }, { transform: `translateY(${to}px)` }],
+        { duration: 550, easing: 'ease-in-out', fill: 'forwards' },
+      );
+      await alertTickerAnimation.finished.catch(() => {});
+      if (alertTickerGeneration !== generation) return;
+    }
+    await waitForAlert(hold);
+    if (alertTickerGeneration !== generation) return;
+  }
+}
+
+function reserveAlertSpace() {
+  const band = document.querySelector('#alert-ticker');
+  const frame = document.querySelector('.configured-display');
+  if (!band || !frame) return;
+  const height = band.hidden ? 0 : band.getBoundingClientRect().height;
+  const value = `${height}px`;
+  if (frame.style.getPropertyValue('--display-alert-height') === value) return;
+  frame.style.setProperty('--display-alert-height', value);
+  // Place the header in the new content area before the ticker's first paint.
+  layoutConfiguredCards();
+}
+
+async function runAlertTicker(generation) {
+  const band = document.querySelector('#alert-ticker');
+  if (!band) return;
+  if (alertTickerGeneration !== generation) return;
+  if (alertTickerItems.length === 0) {
+    cancelTickerAnimation(band.querySelector('.alert-ticker__text'));
+    band.classList.remove('is-visible');
+    band.hidden = true;
+    reserveAlertSpace();
+    return;
+  }
+  band.hidden = false;
+  reserveAlertSpace();
+  const single = alertTickerItems.length === 1;
+  let index = 0;
+  while (alertTickerGeneration === generation) {
+    const alert = alertTickerItems[index % alertTickerItems.length];
+    await presentTickerAlert(band, alert, generation);
+    if (alertTickerGeneration !== generation || single) break;
+    index += 1;
+  }
+}
+
+async function refreshAlerts() {
+  try {
+    const res = await fetch('/api/alerts', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && Array.isArray(data.alerts)) setAlerts(data.alerts);
+  } catch (err) {
+    // Network hiccup: the next poll retries.
+  }
+}
+
+window.refreshAlerts = refreshAlerts;
+
 window.setTestOccupants = function (count) {
   const section = document.querySelector('.current-presence, .presence');
   if (!section) return;
@@ -982,6 +1163,7 @@ async function start() {
   await bindDisplayElements();
   initializeConfiguredDisplay();
   await syncServerTime();
+  setAlerts(window.INITIAL_ALERTS || []);
 
   const urlParams = new URLSearchParams(window.location.search);
   const initialTime = window.INITIAL_MOCK_TIME || urlParams.get('time');
@@ -1071,6 +1253,7 @@ async function start() {
   let lastGreetingTime = 0;
   let lastSyncTime = Date.now();
   let lastPresenceRefresh = Date.now();
+  let lastAlertRefresh = Date.now();
 
   startUnthrottledTimer(() => {
     const nowTimestamp = Date.now();
@@ -1100,6 +1283,12 @@ async function start() {
     if (nowTimestamp - lastSyncTime >= 15_000) {
       lastSyncTime = nowTimestamp;
       syncServerTime();
+    }
+
+    // 6. Operator alerts (every 10s): catches TTL expiry and missed events
+    if (nowTimestamp - lastAlertRefresh >= 10_000) {
+      lastAlertRefresh = nowTimestamp;
+      refreshAlerts();
     }
   });
 }

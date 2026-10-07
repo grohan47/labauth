@@ -34,6 +34,8 @@ EXPECTED_TABLES = {
     "presence_log",
     "credential_attempts",
     "admin_audit_log",
+    "settings",
+    "alerts",
     "backup_runs",
     "current_presence",
 }
@@ -196,6 +198,56 @@ def test_presence_events_feed():
     assert latest["type"] == "IN"
     assert {"id", "person", "check_in", "check_out", "timestamp"} <= set(latest)
     presence.store.check_out("Event Person")
+
+
+def test_alerts_crud_and_expiry():
+    # Severity is authoritative: critical sorts before caution before info.
+    info = db.create_alert("Scheduled maintenance", "info")
+    critical = db.create_alert("Evacuate immediately", "critical")
+    caution = db.create_alert("Wet floor", "caution")
+    ordered = [a.severity for a in db.list_alerts()]
+    assert ordered[:3] == ["critical", "caution", "info"], ordered
+
+    updated = db.update_alert(caution.id, message="Wet floor near the mill", severity="critical")
+    assert updated.message == "Wet floor near the mill"
+    assert updated.severity == "critical"
+    assert updated.updated_at >= caution.updated_at
+
+    # A TTL expires the alert out of the active list.
+    expiring = db.create_alert("Temporary", "info", ttl_seconds=3600)
+    assert expiring.expires_at is not None
+    assert any(a.id == expiring.id for a in db.list_alerts())
+    db.update_alert(expiring.id, expires_at="2000-01-01T00:00:00.000Z")
+    assert all(a.id != expiring.id for a in db.list_alerts())
+    assert any(a.id == expiring.id for a in db.list_alerts(include_expired=True))
+
+    assert db.delete_alert(critical.id) is True
+    assert db.get_alert(critical.id) is None
+    assert db.delete_alert(999999) is False
+
+    # Expired rows are physically purged on the next write.
+    db.create_alert("Another", "info", ttl_seconds=None)
+    db.update_alert(expiring.id, expires_at="2000-01-01T00:00:00.000Z")
+    db.purge_expired_alerts()
+    assert db.get_alert(expiring.id) is None
+
+    for alert in db.list_alerts():
+        db.delete_alert(alert.id)
+    assert db.list_alerts() == []
+
+
+def test_alerts_reject_invalid_input():
+    for message, severity in (("", "info"), ("   ", "info"), ("ok", "urgent")):
+        try:
+            db.create_alert(message, severity)
+            raise AssertionError(f"Expected rejection for {(message, severity)!r}")
+        except ValueError:
+            pass
+    try:
+        db.create_alert("x" * (db.ALERT_MAX_LENGTH + 1), "info")
+        raise AssertionError("Expected an over-length message to be rejected")
+    except ValueError:
+        pass
 
 
 def test_reset_empties_lab_and_populate_does_not_log():

@@ -100,6 +100,14 @@ erDiagram
         bigint size_bytes
         text error
     }
+    ALERTS {
+        bigint id PK
+        text message
+        text severity
+        text expires_at
+        timestamp created_at
+        timestamp updated_at
+    }
     CURRENT_PRESENCE {
         bigint user_id PK,FK
         timestamp checked_in_at
@@ -119,7 +127,8 @@ erDiagram
 | `presence_log` | The immutable in/out log; the authoritative record of real check-in/check-out events. |
 | `credential_attempts` | Every authentication attempt, successful or not, with the raw reader message preserved in `message`. |
 | `admin_audit_log` | Consequential admin actions (user added/deleted, display settings changed, bans, etc.) with optional before/after snapshots. |
-| `settings` | Persisted display configuration, e.g. the active alert message under `display_alert`. |
+| `settings` | Persisted display configuration, e.g. per-screen visibility flags. |
+| `alerts` | Operator announcements shown on both displays. `severity` is `critical`, `caution` or `info`; `expires_at` is an optional lifetime, `NULL` meaning it stays until deleted. |
 | `backup_runs` | Outcome of every backup attempt (status, destination, size, error). |
 | `current_presence` | Realtime cache of who is inside, used by the display. Rebuildable from `presence_log`. |
 
@@ -242,9 +251,25 @@ no phone or expanding circles. Navigation buttons have no shadow. Source and lic
 recorded in `src/static/animations/README.md`.
 
 Lyne 5.8.0 and design tokens 2.1.3 load from pinned CDN modules, including the
-checkbox and menu modules. The photo preview uses the documented native image
+checkbox, menu and select modules. The photo preview uses the documented native image
 composition with Lyne image utility classes, avoiding the image component's
 CDN image URL rewriting for local photos. See the official
 [Image](https://digital.sbb.ch/en/design-system/lyne/components/image/),
 [Menu](https://digital.sbb.ch/en/design-system/lyne/components/menu/) and
 [Dialog](https://digital.sbb.ch/en/design-system/lyne/components/dialog/) patterns.
+
+## Alerts
+
+Operator announcements are rows in the standalone `alerts` table. Each has a
+`message`, a `severity` (`critical` > `caution` > `info`) and an optional
+`expires_at` lifetime. The `/admin` Alerts pane creates, edits, deletes and sets
+the expiry of alerts; expired rows are filtered out of `list_alerts()` and
+physically purged on the next write.
+
+The API is `/api/alerts` (`GET` public, `POST` create) plus
+`/api/alerts/{id}` (`PUT`, `DELETE`), all mutations requiring an admin session
+and each one recorded in `admin_audit_log`. Both display channels render the
+same single-line ticker at the top of the screen: active alerts are ordered by
+severity, cross-fade between one another, and reveal a message that does not fit
+on one line a line at a time with a short scroll between lines. The ticker is an
+overlay and has no visibility toggle, so it never reflows the presence layout.

@@ -217,35 +217,122 @@ def api_admin_logout_get(request: Request) -> RedirectResponse:
 
 @app.get("/api/alerts")
 def api_get_alerts() -> JSONResponse:
+    """Active alerts for the displays and the admin pane (public read)."""
     return JSONResponse({
         "status": "ok",
-        "alert": store.get_alert(),
+        "alerts": store.get_alerts(),
     })
+
+
+def _alert_payload(data: dict) -> dict:
+    """Extract and validate alert fields for create/update requests."""
+    fields: dict = {}
+    if "message" in data:
+        message = str(data.get("message") or "").strip()
+        if not message:
+            raise ValueError("Enter an alert message.")
+        if len(message) > db.ALERT_MAX_LENGTH:
+            raise ValueError(f"Keep the message under {db.ALERT_MAX_LENGTH} characters.")
+        fields["message"] = message
+    if "severity" in data:
+        severity = str(data.get("severity") or "").strip().lower()
+        if severity not in db.ALERT_SEVERITIES:
+            raise ValueError("Choose a valid severity.")
+        fields["severity"] = severity
+    update_ttl = "ttl_seconds" in data
+    ttl = data.get("ttl_seconds")
+    if update_ttl and ttl not in (None, "", "none"):
+        try:
+            ttl = int(ttl)
+        except (TypeError, ValueError):
+            raise ValueError("Choose a valid expiry.")
+        if ttl < 0:
+            raise ValueError("Choose a valid expiry.")
+    else:
+        ttl = None
+    return {"fields": fields, "ttl": ttl, "update_ttl": update_ttl}
 
 
 @app.post("/api/alerts")
 async def api_post_alerts(request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
     try:
         data = await request.json()
     except Exception:
         data = {}
-    alert_text = data.get("alert")
-    previous = store.get_alert()
-    store.set_alert(alert_text)
-    current = store.get_alert()
-    if previous != current:
-        db.log_audit(
-            "admin",
-            "settings_changed",
-            "display",
-            entity_id="alert",
-            before=previous,
-            after=current,
-        )
-    return JSONResponse({
-        "status": "ok",
-        "alert": store.get_alert(),
-    })
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        payload = _alert_payload(data)
+        message = payload["fields"].get("message")
+        severity = payload["fields"].get("severity", "info")
+        alert = store.add_alert(message, severity, ttl_seconds=payload["ttl"])
+    except ValueError as err:
+        return JSONResponse({"error": str(err)}, status_code=422)
+    db.log_audit(
+        "admin",
+        "alert_created",
+        "alert",
+        entity_id=str(alert["id"]),
+        after={"message": alert["message"], "severity": alert["severity"]},
+    )
+    return JSONResponse({"status": "ok", "alert": alert})
+
+
+@app.put("/api/alerts/{alert_id}")
+async def api_put_alert(alert_id: int, request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    if db.get_alert(alert_id) is None:
+        return JSONResponse({"error": "Alert not found"}, status_code=404)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        payload = _alert_payload(data)
+    except ValueError as err:
+        return JSONResponse({"error": str(err)}, status_code=422)
+    fields = payload["fields"]
+    if not fields and not payload["update_ttl"]:
+        return JSONResponse({"error": "Nothing to update"}, status_code=422)
+    alert = store.update_alert(
+        alert_id,
+        message=fields.get("message"),
+        severity=fields.get("severity"),
+        ttl_seconds=payload["ttl"],
+        update_ttl=payload["update_ttl"],
+    )
+    db.log_audit(
+        "admin",
+        "alert_updated",
+        "alert",
+        entity_id=str(alert_id),
+        after={"message": fields.get("message"), "severity": fields.get("severity"),
+               "ttl_seconds": payload["ttl"] if payload["update_ttl"] else None},
+    )
+    return JSONResponse({"status": "ok", "alert": alert})
+
+
+@app.delete("/api/alerts/{alert_id}")
+def api_delete_alert(alert_id: int, request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({"error": "Admin session required"}, status_code=401)
+    previous = db.get_alert(alert_id)
+    if previous is None:
+        return JSONResponse({"error": "Alert not found"}, status_code=404)
+    store.delete_alert(alert_id)
+    db.log_audit(
+        "admin",
+        "alert_deleted",
+        "alert",
+        entity_id=str(alert_id),
+        before={"message": previous.message, "severity": previous.severity},
+    )
+    return JSONResponse({"status": "ok", "alerts": store.get_alerts()})
 
 
 @app.get("/api/access-areas")

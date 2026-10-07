@@ -119,33 +119,50 @@ def test_auth_and_session_routes():
         assert "step-1" in html
         print("  ✓ Authenticated /enrollment loaded successfully with session cookie.")
 
-    # 1g: Test alerts API
-    req_alert = urllib.request.Request(
-        f"{BASE_URL}/api/alerts",
-        data=json.dumps({"alert": "Attention: Ventilation testing at 17:00"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req_alert) as resp:
-        assert resp.status == 200
+    # 1g: Test alerts API (create/list/update/delete). Mutations need a session.
+    def alert_request(method, url, payload=None, cookie=session_cookie):
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"Content-Type": "application/json"}
+        if cookie:
+            headers["Cookie"] = cookie
+        return urllib.request.Request(url, data=body, headers=headers, method=method)
+
+    try:
+        urllib.request.urlopen(alert_request("POST", f"{BASE_URL}/api/alerts", {"message": "nope", "severity": "info"}, cookie=None))
+        assert False, "Expected an unauthenticated alert mutation to be rejected"
+    except urllib.error.HTTPError as e:
+        assert e.code == 401, f"Expected 401, got {e.code}"
+        print("  ✓ Unauthenticated POST /api/alerts rejected with HTTP 401.")
+
+    with urllib.request.urlopen(alert_request(
+        "POST", f"{BASE_URL}/api/alerts",
+        {"message": "Attention: Ventilation testing at 17:00", "severity": "caution"},
+    )) as resp:
         data = json.loads(resp.read().decode("utf-8"))
-        assert data.get("alert") == "Attention: Ventilation testing at 17:00"
-        print("  ✓ POST /api/alerts stored active alert.")
+        assert data["alert"]["message"] == "Attention: Ventilation testing at 17:00"
+        assert data["alert"]["severity"] == "caution"
+        alert_id = data["alert"]["id"]
+        print("  ✓ POST /api/alerts created a caution alert.")
 
     with urllib.request.urlopen(f"{BASE_URL}/api/alerts") as resp:
-        assert resp.status == 200
         data = json.loads(resp.read().decode("utf-8"))
-        assert data.get("alert") == "Attention: Ventilation testing at 17:00"
-        print("  ✓ GET /api/alerts retrieved active alert.")
+        assert any(a["id"] == alert_id for a in data["alerts"])
+        print("  ✓ GET /api/alerts lists active alerts.")
 
-    # Reset alert
-    req_reset_alert = urllib.request.Request(
-        f"{BASE_URL}/api/alerts",
-        data=json.dumps({"alert": ""}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    urllib.request.urlopen(req_reset_alert)
+    with urllib.request.urlopen(alert_request(
+        "PUT", f"{BASE_URL}/api/alerts/{alert_id}",
+        {"message": "Updated announcement", "severity": "critical", "ttl_seconds": 3600},
+    )) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["alert"]["message"] == "Updated announcement"
+        assert data["alert"]["severity"] == "critical"
+        assert data["alert"]["remaining_seconds"] is not None
+        print("  ✓ PUT /api/alerts updated message, severity and expiry.")
+
+    with urllib.request.urlopen(alert_request("DELETE", f"{BASE_URL}/api/alerts/{alert_id}")) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        assert all(a["id"] != alert_id for a in data["alerts"])
+        print("  ✓ DELETE /api/alerts removed the alert.")
 
     # 1h: Logout invalidates session
     req_logout = urllib.request.Request(

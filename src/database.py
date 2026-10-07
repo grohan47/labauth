@@ -30,6 +30,7 @@ from typing import Any, Iterator, Optional, Sequence
 from models import (
     AccessArea,
     AdminAuditLogEntry,
+    Alert,
     BackupRun,
     Ban,
     Credential,
@@ -42,8 +43,14 @@ from models import (
 
 DEFAULT_PHOTO = "/static/portraits/default.svg"
 
-#: Key under which the display's active alert message is persisted.
-SETTING_DISPLAY_ALERT = "display_alert"
+#: Alert severities, highest priority first. The order is authoritative.
+ALERT_SEVERITIES: tuple[str, ...] = ("critical", "caution", "info")
+
+#: Longest accepted alert message. The display scrolls anything up to this.
+ALERT_MAX_LENGTH = 500
+
+#: Sentinel meaning "leave this field unchanged" in partial updates.
+_KEEP = object()
 
 #: Canonical, pre-defined access areas. Insert-only seed; never overwritten.
 DEFAULT_ACCESS_AREAS: tuple[tuple[str, str, int], ...] = (
@@ -71,6 +78,7 @@ BACKUP_TABLE_ORDER: tuple[str, ...] = (
     "credential_attempts",
     "admin_audit_log",
     "settings",
+    "alerts",
     "backup_runs",
     "current_presence",
 )
@@ -184,6 +192,17 @@ _SCHEMA = (
         updated_at  TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS alerts (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        message     TEXT NOT NULL,
+        severity    TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('critical', 'caution', 'info')),
+        expires_at  TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts (created_at)",
     """
     CREATE TABLE IF NOT EXISTS backup_runs (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -452,6 +471,17 @@ def _backup_from_row(row: sqlite3.Row) -> BackupRun:
         destination=row["destination"],
         size_bytes=row["size_bytes"],
         error=row["error"],
+    )
+
+
+def _alert_from_row(row: sqlite3.Row) -> Alert:
+    return Alert(
+        id=row["id"],
+        message=row["message"],
+        severity=row["severity"],
+        expires_at=row["expires_at"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -1395,6 +1425,126 @@ def list_backup_runs(*, limit: int = 20) -> list[BackupRun]:
 def latest_backup_run() -> Optional[BackupRun]:
     runs = list_backup_runs(limit=1)
     return runs[0] if runs else None
+
+
+# ---------------------------------------------------------------------------
+# Alerts (operator announcements shown on the displays)
+# ---------------------------------------------------------------------------
+
+_ALERT_ORDER = (
+    "CASE severity WHEN 'critical' THEN 0 WHEN 'caution' THEN 1 ELSE 2 END, "
+    "created_at ASC, id ASC"
+)
+
+
+def _clean_alert_message(message: str) -> str:
+    cleaned = str(message or "").strip()
+    if not cleaned:
+        raise ValueError("Alert message must not be empty")
+    if len(cleaned) > ALERT_MAX_LENGTH:
+        raise ValueError(f"Alert message must be at most {ALERT_MAX_LENGTH} characters")
+    return cleaned
+
+
+def _validate_severity(severity: str) -> str:
+    value = str(severity or "").strip().lower()
+    if value not in ALERT_SEVERITIES:
+        raise ValueError(f"Unknown alert severity: {severity!r}")
+    return value
+
+
+def expires_in(ttl_seconds: Optional[int]) -> Optional[str]:
+    """Translate a lifetime in seconds to an ISO expiry, or ``None`` for never."""
+    if ttl_seconds is None:
+        return None
+    try:
+        seconds = int(ttl_seconds)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    return _iso_from_dt(datetime.now(timezone.utc) + timedelta(seconds=seconds))
+
+
+def list_alerts(*, include_expired: bool = False) -> list[Alert]:
+    """Active alerts, ordered by severity (critical first) then oldest first."""
+    now = utcnow_iso()
+    where = "" if include_expired else "WHERE expires_at IS NULL OR expires_at > ?"
+    params: tuple[Any, ...] = () if include_expired else (now,)
+    with get_db() as db:
+        rows = db.execute(
+            f"SELECT * FROM alerts {where} ORDER BY {_ALERT_ORDER}", params
+        ).fetchall()
+    return [_alert_from_row(row) for row in rows]
+
+
+def get_alert(alert_id: int) -> Optional[Alert]:
+    with get_db() as db:
+        row = db.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+    return _alert_from_row(row) if row else None
+
+
+def create_alert(
+    message: str, severity: str, *, ttl_seconds: Optional[int] = None
+) -> Alert:
+    cleaned = _clean_alert_message(message)
+    level = _validate_severity(severity)
+    now = utcnow_iso()
+    with get_db() as db:
+        cur = db.execute(
+            """
+            INSERT INTO alerts (message, severity, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (cleaned, level, expires_in(ttl_seconds), now, now),
+        )
+        alert_id = cur.lastrowid
+    alert = get_alert(alert_id)
+    assert alert is not None
+    return alert
+
+
+def update_alert(
+    alert_id: int,
+    *,
+    message: Optional[str] = None,
+    severity: Optional[str] = None,
+    expires_at: Any = _KEEP,
+) -> Optional[Alert]:
+    """Patch an alert. Pass ``expires_at=None`` to remove its expiry."""
+    fields: dict[str, Any] = {}
+    if message is not None:
+        fields["message"] = _clean_alert_message(message)
+    if severity is not None:
+        fields["severity"] = _validate_severity(severity)
+    if expires_at is not _KEEP:
+        fields["expires_at"] = expires_at
+    if not fields:
+        return get_alert(alert_id)
+    fields["updated_at"] = utcnow_iso()
+    assignments = ", ".join(f"{column} = ?" for column in fields)
+    with get_db() as db:
+        db.execute(
+            f"UPDATE alerts SET {assignments} WHERE id = ?",
+            (*fields.values(), alert_id),
+        )
+    return get_alert(alert_id)
+
+
+def delete_alert(alert_id: int) -> bool:
+    with get_db() as db:
+        cur = db.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
+        return cur.rowcount > 0
+
+
+def purge_expired_alerts() -> int:
+    """Physically drop alerts whose lifetime has elapsed."""
+    with get_db() as db:
+        cur = db.execute(
+            "DELETE FROM alerts WHERE expires_at IS NOT NULL AND expires_at <= ?",
+            (utcnow_iso(),),
+        )
+        return cur.rowcount
 
 
 # ---------------------------------------------------------------------------

@@ -117,6 +117,23 @@ class BackupRun:
 
 
 @dataclass(frozen=True)
+class Alert:
+    """An operator announcement shown on the lab displays.
+
+    ``severity`` is one of ``critical``, ``caution`` or ``info`` and drives both
+    the colour theme and the display order. ``expires_at`` is ``None`` for an
+    alert that stays until it is deleted, otherwise an ISO-8601 UTC timestamp.
+    """
+
+    id: int
+    message: str
+    severity: str  # 'critical' | 'caution' | 'info'
+    created_at: str
+    updated_at: str
+    expires_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class CurrentOccupant:
     """A user currently inside, assembled for the live display."""
 

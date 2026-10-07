@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Iterable
@@ -105,8 +106,6 @@ class PresenceStore:
         self._mock_time: str | None = None
         self._mock_date: str | None = None
         db.init_db()
-        # The active alert is persisted; memory is only a cache of it.
-        self._alert = db.get_setting(db.SETTING_DISPLAY_ALERT)
 
     # -- helpers -----------------------------------------------------------
 
@@ -348,17 +347,58 @@ class PresenceStore:
     def get_mock_date(self) -> str | None:
         return self._mock_date
 
-    def set_alert(self, text: str | None) -> None:
-        cleaned = text.strip() if text and text.strip() else None
-        with self._lock:
-            self._alert = cleaned
-            # Persisted so the display message survives a restart.
-            db.set_setting(db.SETTING_DISPLAY_ALERT, cleaned)
-        self._notify({"type": "alert", "alert": cleaned})
+    # -- alerts (persisted, operator-authored announcements) ---------------
 
-    def get_alert(self) -> str | None:
-        with self._lock:
-            return self._alert
+    @staticmethod
+    def _alert_dict(alert: db.Alert) -> dict:
+        remaining = None
+        if alert.expires_at:
+            remaining = max(0, int(db.iso_to_epoch(alert.expires_at) - time.time()))
+        return {
+            "id": alert.id,
+            "message": alert.message,
+            "severity": alert.severity,
+            "created_at": alert.created_at,
+            "updated_at": alert.updated_at,
+            "expires_at": alert.expires_at,
+            "remaining_seconds": remaining,
+        }
+
+    def get_alerts(self) -> list[dict]:
+        """Active alerts, highest severity first, ready for the displays."""
+        return [self._alert_dict(alert) for alert in db.list_alerts()]
+
+    def add_alert(
+        self, message: str, severity: str = "info", ttl_seconds: int | None = None
+    ) -> dict:
+        db.purge_expired_alerts()
+        alert = db.create_alert(message, severity, ttl_seconds=ttl_seconds)
+        self._notify({"type": "alerts"})
+        return self._alert_dict(alert)
+
+    def update_alert(
+        self,
+        alert_id: int,
+        *,
+        message: str | None = None,
+        severity: str | None = None,
+        ttl_seconds: int | None = None,
+        update_ttl: bool = False,
+    ) -> dict | None:
+        alert = db.update_alert(
+            alert_id,
+            message=message,
+            severity=severity,
+            expires_at=db.expires_in(ttl_seconds) if update_ttl else db._KEEP,
+        )
+        self._notify({"type": "alerts"})
+        return self._alert_dict(alert) if alert else None
+
+    def delete_alert(self, alert_id: int) -> bool:
+        removed = db.delete_alert(alert_id)
+        if removed:
+            self._notify({"type": "alerts"})
+        return removed
 
     def notify_settings_changed(self, screen: str = "display") -> None:
         self._notify({"type": "display_settings_updated", "screen": screen})

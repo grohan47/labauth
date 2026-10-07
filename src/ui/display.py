@@ -233,6 +233,7 @@ def build_display(*, admin: bool = False) -> None:
         init_mock_js += f"window.INITIAL_AUTH_EVENT = {json.dumps(init_event)};\n"
     init_mock_js += f"window.INITIAL_PRESENCE_SIGNATURE = {json.dumps(presence_signature())};\n"
     init_mock_js += f"window.DISPLAY_SCREEN = {json.dumps('admin-display' if admin else 'display')};\n"
+    init_mock_js += f"window.INITIAL_ALERTS = {json.dumps(store.get_alerts())};\n"
 
     initial_theme = _color_scheme()
     ui.add_head_html(
@@ -309,12 +310,39 @@ def build_display(*, admin: bool = False) -> None:
 
             ui.html('<div id="auth-alert-overlay" class="auth-alert-overlay" role="dialog" aria-modal="true" aria-live="assertive" hidden></div>', sanitize=False)
             ui.html('<div id="auth-feedback" class="auth-feedback" role="status" aria-live="polite" hidden></div>', sanitize=False)
+            ticker = element(
+                "div",
+                element(
+                    "div",
+                    element("span", "", css_class="alert-ticker__severity")
+                    + element(
+                        "div",
+                        element("span", "", css_class="alert-ticker__text"),
+                        css_class="alert-ticker__viewport",
+                    ),
+                    css_class="alert-ticker__inner",
+                ),
+                id="alert-ticker",
+                css_class="alert-ticker alert-ticker--info",
+                role="status",
+                aria_live="polite",
+                hidden=True,
+            )
+            ui.html(ticker, sanitize=False)
 
     client = ui.context.client
 
     def on_presence_update(event: dict | None = None) -> None:
         try:
             with client:
+                if event and event.get("type") == "alerts":
+                    if client.has_socket_connection:
+                        client.run_javascript(
+                            "if (window.setAlerts) "
+                            f"window.setAlerts({json.dumps(store.get_alerts())});"
+                        )
+                    return
+
                 if event and event.get("type") == "display_settings_updated":
                     screen = event.get("screen")
                     if screen is None or screen == screen_target:
