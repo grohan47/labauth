@@ -5,7 +5,7 @@ from html import escape
 from nicegui import ui
 
 from presence import PersonInside, store
-from ui.lyne import asset_url, lyne_assets, card, chip, icon, image, title
+from ui.lyne import asset_url, card, element, image, lyne_assets, title
 
 
 def _formatted_date() -> str:
@@ -62,7 +62,10 @@ def _person_card(
 ) -> str:
     tool_count = len(person.access)
     chip_size = "xs" if (density == "3rows" or tool_count > 2) else "s"
-    access = "".join(f'<sbb-chip-label size="{chip_size}"><span class="access-label">{escape(item)}</span></sbb-chip-label>' for item in person.access) if show_tools else ""
+    access = "".join(
+        element("sbb-chip-label", f'<span class="access-label">{escape(item)}</span>', size=chip_size)
+        for item in person.access
+    ) if show_tools else ""
     visual_level = 5 if density == "3rows" else 4 if density == "2rows" else 3
     spacing = {
         "1row": "sbb-card-spacing-xxs",
@@ -283,7 +286,7 @@ def build_display(*, admin: bool = False) -> None:
             <aside class="time-panel" aria-label="Current time">
                 <div class="clock-stack">
                     <time class="clock-date" id="clock-date" data-visible="show_date">{_formatted_date()}</time>
-                    <sbb-clock data-visible="show_clock" aria-label="Analogue clock"></sbb-clock>
+                    {element("sbb-clock", "", data_visible="show_clock", aria_label="Analogue clock")}
                     <time class="digital-time" id="digital-time" data-visible="show_digital_time">--:--</time>
                 </div>
             </aside>

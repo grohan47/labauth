@@ -21,7 +21,7 @@ from ui.admin_display import (
 from ui.display import build_display, presence_signature, render_presence_html
 from ui.display_settings import build_display_settings_page
 from ui.enrolment import build_enrolment_page
-from ui.lyne import asset_url, lyne_assets
+from ui.lyne import asset_url, button, container, element, form_field, lyne_assets
 
 SESSION_COOKIE_NAME = "labauth_admin_session"
 
@@ -495,23 +495,29 @@ def logs_page(request: Request) -> RedirectResponse | None:
         <link rel="stylesheet" href="{asset_url("display.css")}">
         {lyne_assets()}
     """)
-    ui.html("""
-        <main class="admin-panel">
-            <sbb-container color="transparent" class="admin-panel-shell">
-                <header class="admin-header">
-                    <h1 class="admin-heading">Logs.</h1>
-                    <div class="admin-header-controls">
-                        <sbb-secondary-button href="/admin" size="m" aria-label="Return to administration">
-                            Admin
-                        </sbb-secondary-button>
-                    </div>
-                </header>
-                <div style="margin-block-start: var(--sbb-spacing-responsive-l);">
-                    <p style="color: var(--display-muted);">Immutable audit & presence logs (not yet constructed).</p>
-                </div>
-            </sbb-container>
-        </main>
-    """, sanitize=False)
+    page = element(
+        "main",
+        container(
+            element(
+                "header",
+                element("h1", "Logs.", css_class="admin-heading")
+                + element(
+                    "div",
+                    button("Admin", variant="secondary", href="/admin", size="m", aria_label="Return to administration"),
+                    css_class="admin-header-controls",
+                ),
+                css_class="admin-header",
+            )
+            + element(
+                "div",
+                element("p", "Immutable audit & presence logs (not yet constructed).", style="color: var(--display-muted);"),
+                style="margin-block-start: var(--sbb-spacing-responsive-l);",
+            ),
+            css_class="admin-panel-shell",
+        ),
+        css_class="admin-panel",
+    )
+    ui.html(page, sanitize=False)
     return None
 
 
@@ -523,62 +529,39 @@ def search_page(request: Request) -> RedirectResponse | None:
         <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
         <link rel="stylesheet" href="{asset_url("display.css")}">
         {lyne_assets()}
+        <script type="module" src="{asset_url("search.js")}"></script>
     """)
-    ui.html("""
-        <main class="admin-panel">
-            <sbb-container color="transparent" class="admin-panel-shell">
-                <header class="admin-header">
-                    <h1 class="admin-heading">Search.</h1>
-                    <div class="admin-header-controls">
-                        <sbb-secondary-button href="/admin" size="m" aria-label="Return to administration">
-                            Admin
-                        </sbb-secondary-button>
-                    </div>
-                </header>
-                <div style="margin-block-start: var(--sbb-spacing-responsive-l); max-width: 32rem;">
-                    <sbb-form-field size="m" width="default" floating-label>
-                        <label for="search-user-input">Search enrolled users by name</label>
-                        <input id="search-user-input" type="search" placeholder="Type a name..." autocomplete="off">
-                    </sbb-form-field>
-                    <div id="search-results-list" style="margin-block-start: var(--sbb-spacing-fixed-4x);"></div>
-                </div>
-            </sbb-container>
-        </main>
-    """, sanitize=False)
-    ui.add_body_html("""
-        <script>
-            (function() {
-                const input = document.querySelector('#search-user-input');
-                const list = document.querySelector('#search-results-list');
-                if (input && list) {
-                    input.addEventListener('input', async () => {
-                        const query = (input.value || '').trim().toLowerCase();
-                        if (!query) {
-                            list.innerHTML = '';
-                            return;
-                        }
-                        try {
-                            const res = await fetch('/api/presence');
-                            if (res.ok) {
-                                const data = await res.json();
-                                const matches = (data.people || []).filter(p => p.name.toLowerCase().includes(query));
-                                if (matches.length === 0) {
-                                    list.innerHTML = '<p style="color: var(--display-muted);">No enrolled users found.</p>';
-                                } else {
-                                    list.innerHTML = matches.map(m => `
-                                        <div style="padding: 12px 16px; border-bottom: 1px solid var(--display-border); display: flex; justify-content: space-between; align-items: center;">
-                                            <span style="font-weight: 500;">${m.name}</span>
-                                            <span style="color: var(--display-muted); font-size: 0.875rem;">${(m.access || []).join(', ')}</span>
-                                        </div>
-                                    `).join('');
-                                }
-                            }
-                        } catch (e) {}
-                    });
-                }
-            })();
-        </script>
-    """)
+    page = element(
+        "main",
+        container(
+            element(
+                "header",
+                element("h1", "Search.", css_class="admin-heading")
+                + element(
+                    "div",
+                    button("Admin", variant="secondary", href="/admin", size="m", aria_label="Return to administration"),
+                    css_class="admin-header-controls",
+                ),
+                css_class="admin-header",
+            )
+            + element(
+                "div",
+                form_field(
+                    label="Search enrolled users by name",
+                    input_id="search-user-input",
+                    size="m",
+                    width="default",
+                    floating_label=True,
+                    input_attrs={"type": "search", "placeholder": "Type a name...", "autocomplete": "off"},
+                )
+                + element("div", "", id="search-results-list", style="margin-block-start: var(--sbb-spacing-fixed-4x);"),
+                style="margin-block-start: var(--sbb-spacing-responsive-l); max-width: 32rem;",
+            ),
+            css_class="admin-panel-shell",
+        ),
+        css_class="admin-panel",
+    )
+    ui.html(page, sanitize=False)
     return None
 
 

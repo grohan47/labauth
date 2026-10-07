@@ -88,6 +88,36 @@ def lyne_assets() -> str:
     return f"{styles}\n{modules}"
 
 
+def _attributes(attrs: dict) -> str:
+    """Render keyword arguments as escaped HTML attributes.
+
+    Underscored names become hyphenated (``aria_label`` -> ``aria-label``),
+    a trailing underscore is dropped (``type_`` -> ``type``), ``True`` renders a
+    bare boolean attribute, and ``None``/``False`` are omitted.
+    """
+    rendered: list[str] = []
+    for name, value in attrs.items():
+        if value is None or value is False:
+            continue
+        name = name.rstrip("_").replace("_", "-")
+        rendered.append(name if value is True else f'{name}="{escape(str(value))}"')
+    return (" " + " ".join(rendered)) if rendered else ""
+
+
+def element(tag: str, content: str = "", *, css_class: str = "", **attrs) -> str:
+    """Render an arbitrary HTML element with escaped attributes."""
+    if css_class:
+        attrs["class"] = css_class
+    return f"<{tag}{_attributes(attrs)}>{content}</{tag}>"
+
+
+def void_element(tag: str, *, css_class: str = "", **attrs) -> str:
+    """Render an HTML void element such as ``<input>``."""
+    if css_class:
+        attrs["class"] = css_class
+    return f"<{tag}{_attributes(attrs)}>"
+
+
 def title(
     text: str,
     *,
@@ -95,27 +125,25 @@ def title(
     visual_level: int | None = None,
     css_class: str = "",
     html_id: str = "",
+    **attrs,
 ) -> str:
-    class_attribute = f' class="{escape(css_class)}"' if css_class else ""
-    id_attribute = f' id="{escape(html_id)}"' if html_id else ""
-    visual_attribute = f' visual-level="{visual_level}"' if visual_level else ""
-    return (
-        f'<sbb-title level="{level}"{visual_attribute}{class_attribute}{id_attribute}>'
-        f"{escape(text)}"
-        "</sbb-title>"
+    return element(
+        "sbb-title",
+        escape(text),
+        level=level,
+        visual_level=visual_level,
+        css_class=css_class,
+        id=html_id or None,
+        **attrs,
     )
 
 
 def image(source: str, *, alt: str, css_class: str = "") -> str:
-    class_attribute = f' class="{escape(css_class)}"' if css_class else ""
-    return (
-        f'<sbb-image image-src="{escape(source)}" alt="{escape(alt)}"'
-        f"{class_attribute}></sbb-image>"
-    )
+    return element("sbb-image", "", image_src=source, alt=alt, css_class=css_class)
 
 
 def chip(text: str, *, size: str = "s") -> str:
-    return f'<sbb-chip-label size="{escape(size)}">{escape(text)}</sbb-chip-label>'
+    return element("sbb-chip-label", escape(text), size=size)
 
 
 def card(
@@ -123,16 +151,187 @@ def card(
     *,
     css_class: str = "",
     color: str = "transparent-bordered",
+    html_id: str = "",
 ) -> str:
-    class_attribute = f' class="{escape(css_class)}"' if css_class else ""
-    return (
-        f'<sbb-card color="{escape(color)}"{class_attribute}>'
-        f"{content}"
-        "</sbb-card>"
+    return element("sbb-card", content, color=color, css_class=css_class, id=html_id or None)
+
+
+def icon(name: str, *, css_class: str = "", slot: str | None = None, **attrs) -> str:
+    return element("sbb-icon", "", name=name, slot=slot, css_class=css_class, **attrs)
+
+
+_BUTTON_TAGS = {
+    "primary": "sbb-button",
+    "secondary": "sbb-secondary-button",
+    "transparent": "sbb-transparent-button",
+}
+
+
+def button(
+    text: str = "",
+    *,
+    variant: str = "primary",
+    link: bool = False,
+    size: str | None = None,
+    html_id: str = "",
+    css_class: str = "",
+    icon_name: str | None = None,
+    icon_placement: str | None = None,
+    slot_icon: str | None = None,
+    type_: str | None = None,
+    href: str | None = None,
+    aria_label: str | None = None,
+    disabled: bool = False,
+    **attrs,
+) -> str:
+    """Render a Lyne button or button-link.
+
+    Use ``slot_icon`` for markup that expects ``<sbb-icon slot="icon">`` and
+    ``icon_name`` for markup that drives the icon through the attribute.
+    """
+    tag = _BUTTON_TAGS[variant] + ("-link" if link else "")
+    content = (icon(slot_icon, slot="icon") if slot_icon else "") + escape(text)
+    return element(
+        tag,
+        content,
+        id=html_id or None,
+        css_class=css_class,
+        size=size,
+        icon_name=icon_name,
+        icon_placement=icon_placement,
+        type=type_,
+        href=href,
+        aria_label=aria_label,
+        disabled=disabled,
+        **attrs,
     )
 
 
-def icon(name: str, *, css_class: str = "") -> str:
-    class_attribute = f' class="{escape(css_class)}"' if css_class else ""
-    return f'<sbb-icon name="{escape(name)}"{class_attribute}></sbb-icon>'
+def checkbox(
+    label: str,
+    *,
+    name: str | None = None,
+    value: str | int | None = None,
+    size: str | None = None,
+    checked: bool = False,
+    data_setting: str | None = None,
+    css_class: str = "",
+    **attrs,
+) -> str:
+    return element(
+        "sbb-checkbox",
+        escape(label),
+        name=name,
+        value=value,
+        size=size,
+        checked=checked,
+        data_setting=data_setting,
+        css_class=css_class,
+        **attrs,
+    )
 
+
+def radio_button(
+    label: str,
+    *,
+    value: str | None = None,
+    name: str | None = None,
+    checked: bool = False,
+    size: str | None = None,
+    **attrs,
+) -> str:
+    return element(
+        "sbb-radio-button",
+        escape(label),
+        value=value,
+        name=name,
+        checked=checked,
+        size=size,
+        **attrs,
+    )
+
+
+def select(
+    *,
+    name: str,
+    options: tuple[tuple[str, str], ...],
+    value: str | None = None,
+    size: str | None = None,
+    css_class: str = "",
+    html_id: str = "",
+    aria_label: str | None = None,
+    **attrs,
+) -> str:
+    """Render a Lyne select with ``(value, label)`` options."""
+    inner = "".join(
+        element("sbb-option", escape(label), value=option_value, selected=option_value == value)
+        for option_value, label in options
+    )
+    return element(
+        "sbb-select",
+        inner,
+        name=name,
+        value=value,
+        size=size,
+        css_class=css_class,
+        id=html_id or None,
+        aria_label=aria_label,
+        **attrs,
+    )
+
+
+def form_field(
+    *,
+    label: str,
+    input_id: str,
+    size: str | None = None,
+    width: str | None = None,
+    floating_label: bool = False,
+    css_class: str = "",
+    input_attrs: dict | None = None,
+    content: str = "",
+) -> str:
+    """Render a Lyne form field wrapping a labelled native input."""
+    attrs = dict(input_attrs or {})
+    attrs.setdefault("id", input_id)
+    inner = element("label", escape(label), **{"for": input_id})
+    inner += void_element("input", **attrs)
+    inner += content
+    return element(
+        "sbb-form-field",
+        inner,
+        size=size,
+        width=width,
+        floating_label=floating_label,
+        css_class=css_class,
+    )
+
+
+def container(content: str, *, expanded: bool = False, css_class: str = "") -> str:
+    return element("sbb-container", content, color="transparent", expanded=expanded, css_class=css_class)
+
+
+def menu_button(
+    text: str,
+    *,
+    html_id: str = "",
+    icon_name: str | None = None,
+    hidden: bool = False,
+    **attrs,
+) -> str:
+    return element(
+        "sbb-menu-button",
+        escape(text),
+        id=html_id or None,
+        icon_name=icon_name,
+        hidden=hidden,
+        **attrs,
+    )
+
+
+def card_link(text: str, *, href: str, **attrs) -> str:
+    return element("sbb-card-link", escape(text), href=href, **attrs)
+
+
+def card_button(text: str, *, html_id: str = "", **attrs) -> str:
+    return element("sbb-card-button", escape(text), id=html_id or None, **attrs)

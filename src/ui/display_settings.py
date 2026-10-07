@@ -5,7 +5,7 @@ from nicegui import ui
 
 import database as db
 from ui.admin_display import ADMIN_ICONS_JS
-from ui.lyne import asset_url, lyne_assets
+from ui.lyne import asset_url, button, checkbox, container, element, lyne_assets, radio_button
 
 SCREEN_LABELS = {"display": "Public display", "admin-display": "Admin display"}
 SCREEN_CONTROLS = {
@@ -20,7 +20,7 @@ CARD_CONTROLS = {
 
 
 def _checkboxes(controls: dict) -> str:
-    return "".join(f'<sbb-checkbox size="s" data-setting="{key}" checked>{label}</sbb-checkbox>' for key, label in controls.items())
+    return "".join(checkbox(label, size="s", data_setting=key, checked=True) for key, label in controls.items())
 
 
 def _screen_outline() -> str:
@@ -35,7 +35,7 @@ def _screen_outline() -> str:
         <div class="outline-presence">
             <div class="outline-summary" data-part="show_summary"></div>
             <div class="outline-grid" data-grid>
-                <div class="outline-greeter-zone" data-part="show_greeter"><div class="outline-greeter"></div></div>
+                <div class="outline-greeter-zone" data-part="show_greeter"><div class="outline-greeter">LabAuth</div></div>
                 <div class="outline-clock-stack" data-time-zone>
                     <span class="outline-date" data-part="show_date"></span>
                     <span class="outline-clock" data-part="show_clock"></span>
@@ -65,27 +65,45 @@ def build_display_settings_page() -> None:
         </script>
         <script type="module" src="{asset_url('display-settings.js')}"></script>
     ''')
-    targets = "".join(f'<sbb-radio-button value="{screen}" {"checked" if screen == "display" else ""}>{label}</sbb-radio-button>' for screen, label in SCREEN_LABELS.items())
-    ui.html(f'''
-        <main class="admin-panel admin-panel--settings" data-theme="{theme}">
-            <sbb-container color="transparent" expanded class="admin-panel-shell">
-                <header class="admin-header">
-                    <h1 class="admin-heading">Display settings.</h1>
-                    <sbb-secondary-button href="/admin" size="m">Back</sbb-secondary-button>
-                </header>
-                <div class="settings-body">
-                    <sbb-radio-button-group name="screen" size="s" aria-label="Screen" data-target>{targets}</sbb-radio-button-group>
-                    <div class="settings-controls" aria-label="Screen components">{_checkboxes(SCREEN_CONTROLS)}</div>
-                    {_screen_outline()}
-                    <div class="settings-card-controls">
-                        <div class="settings-controls" aria-label="Card information">{_checkboxes(CARD_CONTROLS)}</div>
-                    </div>
-                </div>
-                <div class="settings-actions">
-                    <span id="settings-status" role="status" aria-live="polite"></span>
-                    <sbb-secondary-button id="settings-reset" size="m">Reset</sbb-secondary-button>
-                    <sbb-button id="settings-apply" size="m">Apply</sbb-button>
-                </div>
-            </sbb-container>
-        </main>
-    ''', sanitize=False).classes('w-full admin-panel-host')
+    targets = "".join(radio_button(label, value=screen, checked=screen == "display") for screen, label in SCREEN_LABELS.items())
+    body = (
+        element(
+            "header",
+            element("h1", "Display settings.", css_class="admin-heading")
+            + button("Back", variant="secondary", link=True, href="/admin", size="m"),
+            css_class="admin-header",
+        )
+        + element(
+            "div",
+            element(
+                "sbb-radio-button-group",
+                targets,
+                name="screen",
+                size="s",
+                aria_label="Screen",
+                data_target=True,
+            )
+            + element("div", _checkboxes(SCREEN_CONTROLS), css_class="settings-controls", aria_label="Screen components")
+            + _screen_outline()
+            + element(
+                "div",
+                element("div", _checkboxes(CARD_CONTROLS), css_class="settings-controls", aria_label="Card information"),
+                css_class="settings-card-controls",
+            ),
+            css_class="settings-body",
+        )
+        + element(
+            "div",
+            element("span", "", id="settings-status", role="status", aria_live="polite")
+            + button("Reset", variant="secondary", html_id="settings-reset", size="m")
+            + button("Apply", html_id="settings-apply", size="m"),
+            css_class="settings-actions",
+        )
+    )
+    page = element(
+        "main",
+        container(body, expanded=True, css_class="admin-panel-shell"),
+        css_class="admin-panel admin-panel--settings",
+        data_theme=theme,
+    )
+    ui.html(page, sanitize=False).classes('w-full admin-panel-host')

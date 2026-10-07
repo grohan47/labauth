@@ -2,97 +2,170 @@
 
 from __future__ import annotations
 
-import html
-
 from nicegui import ui
 import database as db
 from ui.lyne import (
     asset_url,
-    JSDELIVR_NPM,
-    LYNE_DESIGN_TOKENS_VERSION,
-    LYNE_ELEMENTS_VERSION,
+    button,
+    card,
+    checkbox,
+    element,
+    form_field,
+    icon,
+    lyne_assets,
+    menu_button,
+    title,
 )
 from ui.display import _color_scheme
 
 
 def build_enrolment_page() -> None:
     areas = db.list_access_areas()
-    checkboxes = "".join(
-        f'<sbb-checkbox name="access" value="{area.id}">{html.escape(area.label)}</sbb-checkbox>'
-        for area in areas
-    )
+    checkboxes = "".join(checkbox(area.label, name="access", value=area.id) for area in areas)
     theme = _color_scheme()
-    modules = (
-        "button",
-        "card",
-        "title",
-        "form-field",
-        "checkbox",
-        "checkbox-group",
-        "icon",
-        "image",
-        "divider",
-        "menu",
-        "dialog",
-        "chip-label",
-        "notification",
-        "link",
-    )
-    module_tags = "\n".join(
-        f'<script type="module" src="{JSDELIVR_NPM}/@sbb-esta/lyne-elements@{LYNE_ELEMENTS_VERSION}/{module}.js/+esm"></script>'
-        for module in modules
-    )
     ui.add_head_html(f"""
-        <link rel="stylesheet" href="{JSDELIVR_NPM}/@sbb-esta/lyne-design-tokens@{LYNE_DESIGN_TOKENS_VERSION}/dist/css/sbb-variables.css">
-        <link rel="stylesheet" href="{JSDELIVR_NPM}/@sbb-esta/lyne-elements@{LYNE_ELEMENTS_VERSION}/standard-theme.css">
+        {lyne_assets()}
         <link rel="stylesheet" href="{asset_url("display.css")}">
         <link rel="stylesheet" href="{asset_url("enrolment.css")}">
         <script>document.documentElement.dataset.theme = "{theme}"; document.documentElement.style.colorScheme = "{theme}"; document.documentElement.classList.add("sbb-{theme}");</script>
-        {module_tags}
         <script type="module" src="{asset_url("enrolment.js")}"></script>
     """)
-    ui.html(f"""
-    <main class="enrolment-page">
-      <div id="enrolment-progress" class="enrolment-progress" role="progressbar" aria-label="Enrolment progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25" aria-valuetext="Details">
-        <sbb-divider id="enrolment-progress-fill" aria-hidden="true"></sbb-divider>
-      </div>
-      <div class="enrolment-shell">
-        <section id="step-1" class="enrolment-step" aria-labelledby="heading-1">
-          <sbb-title level="1" visual-level="2" id="heading-1" tabindex="-1">Hello!</sbb-title>
-          <form id="identity-form" novalidate>
-            <sbb-card class="identity-card build-card student-card" color="transparent-bordered">
+
+    avatar_button = element(
+        "sbb-transparent-button",
+        '<img id="mock-card-avatar" class="portrait sbb-image-1-1 sbb-image-border-radius-round" '
+        'src="/static/portraits/default.svg" alt="Profile photo">'
+        f'<span class="photo-caption">{icon("camera-small")}<span>Photo</span></span>',
+        id="avatar-click-zone",
+        css_class="photo-button",
+        size="l",
+        aria_label="Add or change photo",
+    )
+    name_field = form_field(
+        label="Full name *",
+        input_id="input-fullname",
+        size="l",
+        css_class="name-field",
+        input_attrs={"name": "name", "type": "text", "autocomplete": "name", "maxlength": 200, "required": True},
+    )
+    record_fields = "".join((
+        form_field(
+            label="Plaksha ID",
+            input_id="input-plaksha-id",
+            size="l",
+            input_attrs={"name": "plaksha_id", "maxlength": 100, "autocomplete": "off"},
+        ),
+        form_field(
+            label="Phone",
+            input_id="input-phone",
+            size="l",
+            input_attrs={"name": "phone", "type": "tel", "maxlength": 100, "autocomplete": "tel"},
+        ),
+        form_field(
+            label="Email",
+            input_id="input-email",
+            size="l",
+            input_attrs={"name": "email", "type": "email", "maxlength": 254, "autocomplete": "email"},
+        ),
+    ))
+    access_group = element(
+        "sbb-checkbox-group",
+        checkboxes or '<span class="muted">No areas configured</span>',
+        id="access-checkbox-group",
+        orientation="vertical",
+    )
+    identity_card = card(
+        f"""
               <div class="identity-top">
-                <sbb-transparent-button id="avatar-click-zone" class="photo-button" size="l" aria-label="Add or change photo">
-                  <img id="mock-card-avatar" class="portrait sbb-image-1-1 sbb-image-border-radius-round" src="/static/portraits/default.svg" alt="Profile photo">
-                  <span class="photo-caption"><sbb-icon name="camera-small"></sbb-icon><span>Photo</span></span>
-                </sbb-transparent-button>
-                <sbb-form-field size="l" class="name-field">
-                  <label for="input-fullname">Full name *</label>
-                  <input id="input-fullname" name="name" type="text" autocomplete="name" maxlength="200" required>
-                </sbb-form-field>
+                {avatar_button}
+                {name_field}
               </div>
               <div class="card-record-fields">
-                <sbb-form-field size="l"><label for="input-plaksha-id">Plaksha ID</label><input id="input-plaksha-id" name="plaksha_id" maxlength="100" autocomplete="off"></sbb-form-field>
-                <sbb-form-field size="l"><label for="input-phone">Phone</label><input id="input-phone" name="phone" type="tel" maxlength="100" autocomplete="tel"></sbb-form-field>
-                <sbb-form-field size="l"><label for="input-email">Email</label><input id="input-email" name="email" type="email" maxlength="254" autocomplete="email"></sbb-form-field>
+                {record_fields}
               </div>
               <fieldset class="access-fieldset">
                 <legend>Authorised areas</legend>
-                <sbb-checkbox-group id="access-checkbox-group" orientation="vertical">{checkboxes or '<span class="muted">No areas configured</span>'}</sbb-checkbox-group>
+                {access_group}
               </fieldset>
-            </sbb-card>
+        """,
+        css_class="identity-card build-card student-card",
+    )
+    final_card = card(
+        f"""
+              <div class="identity-top">
+                <img id="final-card-photo" class="portrait sbb-image-1-1 sbb-image-border-radius-round" src="/static/portraits/default.svg" alt="Profile photo">
+                {title("", level=2, visual_level=3, html_id="final-card-name")}
+              </div>
+              <div id="final-card-chips" class="access-chips"></div>
+              <div class="credentials">
+                <span class="credential" id="final-cred-fp">{icon("fingerprint-small")}<span>Fingerprint <span class="credential-state">Not enrolled</span></span></span>
+                <span class="credential" id="final-cred-nfc">{icon("swisspass-small")}<span>NFC card <span class="credential-state">Not enrolled</span></span></span>
+              </div>
+        """,
+        css_class="identity-card final-card student-card",
+    )
+    photo_menu = element(
+        "sbb-menu",
+        menu_button("Choose photo", html_id="btn-choose-file", icon_name="folder-open-small")
+        + menu_button("Take photo", html_id="btn-choose-camera", icon_name="camera-small")
+        + menu_button("Remove photo", html_id="btn-remove-photo", icon_name="trash-small", hidden=True),
+        id="photo-menu",
+        trigger="avatar-click-zone",
+    )
+    camera_dialog = element(
+        "sbb-dialog",
+        element("sbb-dialog-title", '<span id="camera-title">Take photo</span>')
+        + element("sbb-dialog-close-button", "", aria_label="Close camera")
+        + element(
+            "sbb-dialog-content",
+            '<div class="camera-preview"><video id="webcam-video" autoplay playsinline muted></video>'
+            '<div class="camera-guide" aria-hidden="true"></div></div>'
+            '<p class="camera-instruction">Centre your face in the circle</p>'
+            '<div id="camera-error" role="alert" hidden></div>',
+        )
+        + element(
+            "sbb-dialog-actions",
+            button("Cancel", variant="transparent", html_id="btn-camera-cancel", sbb_dialog_close=True)
+            + button("Capture", html_id="btn-camera-capture", icon_name="camera-small", disabled=True),
+        ),
+        id="camera-dialog",
+        aria_labelledby="camera-title",
+    )
+    discard_dialog = element(
+        "sbb-dialog",
+        element("sbb-dialog-title", '<span id="discard-title">Discard enrolment?</span>')
+        + element("sbb-dialog-close-button", "", aria_label="Keep editing")
+        + element(
+            "sbb-dialog-actions",
+            button("Keep editing", variant="transparent", sbb_dialog_close=True)
+            + button("Discard", link=True, href="/admin"),
+        ),
+        id="discard-dialog",
+        aria_labelledby="discard-title",
+    )
+
+    ui.html(f"""
+    <main class="enrolment-page">
+      <div id="enrolment-progress" class="enrolment-progress" role="progressbar" aria-label="Enrolment progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="25" aria-valuetext="Details">
+        {element("sbb-divider", "", id="enrolment-progress-fill", aria_hidden="true")}
+      </div>
+      <div class="enrolment-shell">
+        <section id="step-1" class="enrolment-step" aria-labelledby="heading-1">
+          {title("Hello!", level=1, visual_level=2, html_id="heading-1", tabindex="-1")}
+          <form id="identity-form" novalidate>
+            {identity_card}
             <div id="identity-error" role="alert" hidden></div>
             <nav class="enrolment-actions" aria-label="Step actions">
-              <sbb-button-link id="enrolment-close-btn" size="l" href="/admin" icon-name="arrow-left-small">Back</sbb-button-link>
-              <sbb-button id="btn-step1-next" size="l" type="submit" icon-name="arrow-right-small" icon-placement="end" hidden>Next</sbb-button>
+              {button("Back", link=True, html_id="enrolment-close-btn", size="l", href="/admin", icon_name="arrow-left-small")}
+              {button("Next", html_id="btn-step1-next", size="l", type_="submit", icon_name="arrow-right-small", icon_placement="end", hidden=True)}
             </nav>
           </form>
         </section>
         <section id="step-2" class="enrolment-step reader-step" aria-labelledby="heading-2" hidden>
-          <sbb-title level="1" visual-level="2" id="heading-2" tabindex="-1">Fingerprint</sbb-title>
+          {title("Fingerprint", level=1, visual_level=2, html_id="heading-2", tabindex="-1")}
           <div class="reader-stage" id="fp-stage" role="region" aria-live="polite" title="Click to simulate touch">
             <div id="fp-animation" class="reader-anim-wrap">
-              <sbb-icon class="reader-icon" name="fingerprint-medium" aria-hidden="true"></sbb-icon>
+              {icon("fingerprint-medium", css_class="reader-icon", aria_hidden="true")}
             </div>
             <div class="reader-checkmark-container" id="fp-checkmark" hidden>
               <svg class="reader-checkmark-svg" viewBox="0 0 120 120">
@@ -100,16 +173,16 @@ def build_enrolment_page() -> None:
                 <path class="reader-checkmark-check" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" d="M36 62 L52 78 L84 44" />
               </svg>
             </div>
-            <sbb-title level="2" visual-level="4" id="fp-status-title">Reader ready</sbb-title>
+            {title("Reader ready", level=2, visual_level=4, html_id="fp-status-title")}
             <p class="reader-subtitle" id="fp-status-desc">Touch the biometric sensor to register fingerprint</p>
           </div>
           <nav class="enrolment-actions" aria-label="Step actions">
-            <sbb-button id="btn-step2-back" size="l" icon-name="arrow-left-small">Back</sbb-button>
-            <sbb-button id="btn-fp-skip" size="l" icon-name="arrow-right-small" icon-placement="end">Skip</sbb-button>
+            {button("Back", html_id="btn-step2-back", size="l", icon_name="arrow-left-small")}
+            {button("Skip", html_id="btn-fp-skip", size="l", icon_name="arrow-right-small", icon_placement="end")}
           </nav>
         </section>
         <section id="step-3" class="enrolment-step reader-step" aria-labelledby="heading-3" hidden>
-          <sbb-title level="1" visual-level="2" id="heading-3" tabindex="-1">NFC card</sbb-title>
+          {title("NFC card", level=1, visual_level=2, html_id="heading-3", tabindex="-1")}
           <div class="reader-stage" id="nfc-stage" role="region" aria-live="polite" title="Click to simulate card tap">
             <div id="nfc-tap-animation" class="nfc-tap-animation" aria-hidden="true" data-loaded="true">
               <img class="nfc-tap-gif nfc-tap-gif--dark" src="/static/animations/nfc-tap-dark.gif" alt="Tap card against contactless transit reader">
@@ -121,31 +194,21 @@ def build_enrolment_page() -> None:
                 <path class="reader-checkmark-check" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" d="M36 62 L52 78 L84 44" />
               </svg>
             </div>
-            <sbb-title level="2" visual-level="4" id="nfc-status-title">Hold card to reader</sbb-title>
+            {title("Hold card to reader", level=2, visual_level=4, html_id="nfc-status-title")}
             <p class="reader-subtitle" id="nfc-status-desc">Tap your card on the contactless reader</p>
           </div>
           <nav class="enrolment-actions" aria-label="Step actions">
-            <sbb-button id="btn-step3-back" size="l" icon-name="arrow-left-small">Back</sbb-button>
-            <sbb-button id="btn-nfc-skip" size="l" icon-name="arrow-right-small" icon-placement="end">Skip</sbb-button>
+            {button("Back", html_id="btn-step3-back", size="l", icon_name="arrow-left-small")}
+            {button("Skip", html_id="btn-nfc-skip", size="l", icon_name="arrow-right-small", icon_placement="end")}
           </nav>
         </section>
         <section id="step-4" class="enrolment-step" aria-labelledby="heading-4" hidden>
           <div class="review-heading">
-            <sbb-title level="1" visual-level="2" id="heading-4" tabindex="-1">Your card</sbb-title>
-            <sbb-transparent-button id="btn-edit-details" size="m" icon-name="pen-small">Edit details</sbb-transparent-button>
+            {title("Your card", level=1, visual_level=2, html_id="heading-4", tabindex="-1")}
+            {button("Edit details", variant="transparent", html_id="btn-edit-details", size="m", icon_name="pen-small")}
           </div>
           <div class="identity-layout">
-            <sbb-card class="identity-card final-card student-card" color="transparent-bordered">
-              <div class="identity-top">
-                <img id="final-card-photo" class="portrait sbb-image-1-1 sbb-image-border-radius-round" src="/static/portraits/default.svg" alt="Profile photo">
-                <sbb-title level="2" visual-level="3" id="final-card-name"></sbb-title>
-              </div>
-              <div id="final-card-chips" class="access-chips"></div>
-              <div class="credentials">
-                <span class="credential" id="final-cred-fp"><sbb-icon name="fingerprint-small"></sbb-icon><span>Fingerprint <span class="credential-state">Not enrolled</span></span></span>
-                <span class="credential" id="final-cred-nfc"><sbb-icon name="swisspass-small"></sbb-icon><span>NFC card <span class="credential-state">Not enrolled</span></span></span>
-              </div>
-            </sbb-card>
+            {final_card}
             <div class="record-fields review-record">
               <div class="record-heading">For the record</div>
               <dl>
@@ -157,40 +220,22 @@ def build_enrolment_page() -> None:
           </div>
           <div id="save-error" role="alert" hidden></div>
           <nav class="enrolment-actions" aria-label="Step actions">
-            <sbb-button id="btn-step4-back" size="l" icon-name="arrow-left-small">Back</sbb-button>
-            <sbb-button id="btn-finish-enrolment" size="l" icon-name="tick-small" icon-placement="end">Save</sbb-button>
+            {button("Back", html_id="btn-step4-back", size="l", icon_name="arrow-left-small")}
+            {button("Save", html_id="btn-finish-enrolment", size="l", icon_name="tick-small", icon_placement="end")}
           </nav>
         </section>
         <section id="step-success" class="enrolment-step" aria-labelledby="heading-success" hidden>
-          <sbb-title level="1" visual-level="2" id="heading-success" tabindex="-1">Enrolled</sbb-title>
+          {title("Enrolled", level=1, visual_level=2, html_id="heading-success", tabindex="-1")}
           <div id="saved-card-host"></div>
           <nav class="enrolment-actions" aria-label="Enrolment actions">
-            <sbb-button id="btn-enrol-another" size="l">Enrol another</sbb-button>
-            <sbb-button-link href="/admin" size="l">Done</sbb-button-link>
+            {button("Enrol another", html_id="btn-enrol-another", size="l")}
+            {button("Done", link=True, href="/admin", size="l")}
           </nav>
         </section>
       </div>
     </main>
-    <sbb-menu id="photo-menu" trigger="avatar-click-zone">
-      <sbb-menu-button id="btn-choose-file" icon-name="folder-open-small">Choose photo</sbb-menu-button>
-      <sbb-menu-button id="btn-choose-camera" icon-name="camera-small">Take photo</sbb-menu-button>
-      <sbb-menu-button id="btn-remove-photo" icon-name="trash-small" hidden>Remove photo</sbb-menu-button>
-    </sbb-menu>
+    {photo_menu}
     <input id="photo-file-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
-    <sbb-dialog id="camera-dialog" aria-labelledby="camera-title">
-      <sbb-dialog-title><span id="camera-title">Take photo</span></sbb-dialog-title><sbb-dialog-close-button aria-label="Close camera"></sbb-dialog-close-button>
-      <sbb-dialog-content>
-        <div class="camera-preview"><video id="webcam-video" autoplay playsinline muted></video><div class="camera-guide" aria-hidden="true"></div></div>
-        <p class="camera-instruction">Centre your face in the circle</p>
-        <div id="camera-error" role="alert" hidden></div>
-      </sbb-dialog-content>
-      <sbb-dialog-actions>
-        <sbb-transparent-button id="btn-camera-cancel" sbb-dialog-close>Cancel</sbb-transparent-button>
-        <sbb-button id="btn-camera-capture" icon-name="camera-small" disabled>Capture</sbb-button>
-      </sbb-dialog-actions>
-    </sbb-dialog>
-    <sbb-dialog id="discard-dialog" aria-labelledby="discard-title">
-      <sbb-dialog-title><span id="discard-title">Discard enrolment?</span></sbb-dialog-title><sbb-dialog-close-button aria-label="Keep editing"></sbb-dialog-close-button>
-      <sbb-dialog-actions><sbb-transparent-button sbb-dialog-close>Keep editing</sbb-transparent-button><sbb-button-link href="/admin">Discard</sbb-button-link></sbb-dialog-actions>
-    </sbb-dialog>
+    {camera_dialog}
+    {discard_dialog}
     """, sanitize=False)
