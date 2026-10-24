@@ -5,7 +5,7 @@ from nicegui import ui
 
 import database as db
 from ui.admin_display import ADMIN_ICONS_JS
-from ui.lyne import asset_url, button, checkbox, container, element, lyne_assets, radio_button
+from ui.lyne import asset_url, button, checkbox, container, element, form_field, lyne_assets, radio_button
 
 SCREEN_LABELS = {"display": "Public display", "admin-display": "Admin display"}
 SCREEN_CONTROLS = {
@@ -35,7 +35,10 @@ def _screen_outline() -> str:
         <div class="outline-presence">
             <div class="outline-summary" data-part="show_summary"></div>
             <div class="outline-grid" data-grid>
-                <div class="outline-greeter-zone" data-part="show_greeter"><div class="outline-greeter">LabAuth</div></div>
+                <div class="outline-greeter-zone" data-part="show_greeter">
+                    <div class="outline-greeter">LabAuth</div>
+                    <div class="zone-resize-handle" title="Drag to adjust header split"></div>
+                </div>
                 <div class="outline-clock-stack" data-time-zone>
                     <span class="outline-date" data-part="show_date"></span>
                     <span class="outline-clock" data-part="show_clock"></span>
@@ -44,6 +47,7 @@ def _screen_outline() -> str:
                 {cards}
             </div>
         </div>
+        <div class="outline-resize-handle" title="Drag to resize screen outline"></div>
     </div>'''
 
 
@@ -83,7 +87,35 @@ def build_display_settings_page() -> None:
                 aria_label="Screen",
                 data_target=True,
             )
+            + form_field(label="Date size (px)", input_id="adjust-date-size", size="m",
+                         input_attrs={"type": "number", "min": 14, "max": 32, "step": 1, "value": 18})
             + element("div", _checkboxes(SCREEN_CONTROLS), css_class="settings-controls", aria_label="Screen components")
+            + element(
+                "div",
+                element(
+                    "div",
+                    element("label", "Card scale", **{"for": "adjust-card-scale", "class": "adjust-label"})
+                    + element("input", type="range", id="adjust-card-scale", min="70", max="130", value="100", step="5", css_class="adjust-slider")
+                    + element("span", "100%", id="adjust-card-scale-val", css_class="adjust-val"),
+                    css_class="adjust-group",
+                )
+                + element(
+                    "div",
+                    element("label", "Clock scale", **{"for": "adjust-clock-size", "class": "adjust-label"})
+                    + element("input", type="range", id="adjust-clock-size", min="70", max="140", value="100", step="5", css_class="adjust-slider")
+                    + element("span", "100%", id="adjust-clock-size-val", css_class="adjust-val"),
+                    css_class="adjust-group",
+                )
+                + element(
+                    "div",
+                    element("label", "Header height", **{"for": "adjust-header-height", "class": "adjust-label"})
+                    + element("input", type="range", id="adjust-header-height", min="15", max="40", value="25", step="1", css_class="adjust-slider")
+                    + element("span", "25%", id="adjust-header-height-val", css_class="adjust-val"),
+                    css_class="adjust-group",
+                ),
+                css_class="settings-adjustments",
+                aria_label="Adjust layout elements",
+            )
             + _screen_outline()
             + element(
                 "div",

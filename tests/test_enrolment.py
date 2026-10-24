@@ -143,29 +143,13 @@ async def run() -> None:
                         await client.evaluate("document.querySelector('#btn-step1-next').click()")
                         assert await wait_for(client, "!document.querySelector('#step-2').hidden")
                         assert await client.evaluate("!document.querySelector('#btn-fp-skip').hidden && !document.querySelector('#btn-fp-skip').disabled"), 'Fingerprint Skip is always available'
-                        assert await client.evaluate("document.querySelector('#fp-status-title').textContent") == 'Reader ready'
-                        assert await client.evaluate("!document.querySelector('#fp-animation').hidden && document.querySelector('#fp-checkmark').hidden")
-
-                        # Test fingerprint status states & large checkmark transition
-                        await client.evaluate("window.setFingerprintStatus('complete')")
-                        assert await client.evaluate("document.querySelector('#fp-animation').hidden && !document.querySelector('#fp-checkmark').hidden")
-                        assert await client.evaluate("document.querySelector('#fp-status-title').textContent") == 'Fingerprint Enrolled'
-                        assert await client.evaluate("document.querySelector('#btn-fp-skip').textContent.trim()") == 'Next'
-                        await asyncio.sleep(.35)
-                        await client.screenshot(str(ARTIFACTS / '04-fingerprint-enrolled.png'))
-
-                        # Click stage toggles back to waiting
-                        await client.evaluate("document.querySelector('#fp-stage').click()")
-                        assert await client.evaluate("!document.querySelector('#fp-animation').hidden && document.querySelector('#fp-checkmark').hidden")
-                        assert await client.evaluate("document.querySelector('#fp-status-title').textContent") == 'Reader ready'
-
-                        # Unavailable state
-                        await client.evaluate("window.setFingerprintStatus('unavailable')")
                         assert await client.evaluate("document.querySelector('#fp-status-title').textContent") == 'Reader unavailable'
+                        assert await client.evaluate("document.querySelector('#btn-fp-start').hidden"), 'No fingerprint reader means Start stays unavailable'
+                        assert await client.evaluate("!document.querySelector('#fp-animation').hidden && document.querySelector('#fp-checkmark').hidden")
+                        assert await client.evaluate("typeof window.setFingerprintStatus === 'undefined' && !document.querySelector('#fp-stage').hasAttribute('title')"), 'Fingerprint success cannot be simulated'
                         await client.screenshot(str(ARTIFACTS / '04-fingerprint.png'))
 
-                        # Reset to waiting for standard skip path
-                        await client.evaluate("window.setFingerprintStatus('waiting')")
+                        # Standard hardware-unavailable skip path.
                         await client.evaluate("document.querySelector('#btn-fp-skip').click()")
                         assert await client.evaluate("document.querySelector('#enrolment-progress').getAttribute('aria-valuenow')") == '75'
                         assert await wait_for(client, "!document.querySelector('#step-3').hidden")
@@ -191,25 +175,11 @@ async def run() -> None:
                         assert await client.evaluate("document.querySelector('#input-email').value") == 'maya@plaksha.edu.in'
                         await client.screenshot(str(ARTIFACTS / '05-nfc-dark.png'))
 
-                        # Test NFC status states & large checkmark transition
-                        await client.evaluate("window.setNfcStatus('complete', 'C8:CB:70:69:F0')")
-                        assert await client.evaluate("document.querySelector('#nfc-tap-animation').hidden && !document.querySelector('#nfc-checkmark').hidden")
-                        assert await client.evaluate("document.querySelector('#nfc-status-title').textContent") == 'Card Registered'
-                        assert 'C8:CB:70:69:F0' in await client.evaluate("document.querySelector('#nfc-status-desc').textContent")
-                        assert await client.evaluate("document.querySelector('#btn-nfc-skip').textContent.trim()") == 'Next'
-                        await asyncio.sleep(.35)
-                        await client.screenshot(str(ARTIFACTS / '05-nfc-registered.png'))
-
-                        # Click stage toggles back to waiting
-                        await client.evaluate("document.querySelector('#nfc-stage').click()")
-                        assert await client.evaluate("!document.querySelector('#nfc-tap-animation').hidden && document.querySelector('#nfc-checkmark').hidden")
-
-                        # Unavailable state
-                        await client.evaluate("window.setNfcStatus('unavailable')")
                         assert await client.evaluate("document.querySelector('#nfc-status-title').textContent") == 'Reader unavailable'
+                        assert await client.evaluate("document.querySelector('#btn-nfc-start').hidden"), 'No NFC reader means Start stays unavailable'
+                        assert await client.evaluate("typeof window.setNfcStatus === 'undefined' && !document.querySelector('#nfc-stage').hasAttribute('title')"), 'NFC success cannot be simulated'
 
-                        # Reset to waiting and return to light mode for standard skip path
-                        await client.evaluate("window.setNfcStatus('waiting')")
+                        # Return to light mode for the standard skip path.
                         await theme('12:00', 'light')
                         await client.evaluate("document.querySelector('#btn-nfc-skip').click()")
                         assert await wait_for(client, "!document.querySelector('#step-4').hidden")
@@ -282,7 +252,7 @@ async def run() -> None:
                         await click('btn-nfc-skip', 4)
                         await client.screenshot(str(ARTIFACTS / '09-mobile-review.png'))
                         assert await client.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), 'Mobile review overflow'
-                        print('PASS: vertical card, server-clock themes, transit NFC GIFs, bold Helvetica, reader checkmarks, authentication, Lyne rendering, database areas, photo upload, camera unavailable, draft editing, discard, skips, transactional rejection, record persistence, name-only save, mobile layouts')
+                        print('PASS: vertical card, server-clock themes, transit NFC GIFs, bold Helvetica, hardware-gated reader actions, authentication, Lyne rendering, database areas, photo upload, camera unavailable, draft editing, discard, skips, transactional rejection, record persistence, name-only save, mobile layouts')
                         print(f'Screenshots: {ARTIFACTS}')
                     finally:
                         await client.close()

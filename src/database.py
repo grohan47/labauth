@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sqlite3
 import sys
 import time
@@ -52,10 +53,10 @@ ALERT_MAX_LENGTH = 500
 #: Sentinel meaning "leave this field unchanged" in partial updates.
 _KEEP = object()
 
-#: Canonical, pre-defined access areas. Insert-only seed; never overwritten.
+#: The only physical access areas in this installation.
 DEFAULT_ACCESS_AREAS: tuple[tuple[str, str, int], ...] = (
     ("indoor_lab", "Indoor lab", 10),
-    ("tool_area", "Tool area", 20),
+    ("tool_area", "Tool Area", 20),
 )
 
 #: Human spellings accepted from the API / tooling, resolved to a stable code.
@@ -81,6 +82,7 @@ BACKUP_TABLE_ORDER: tuple[str, ...] = (
     "alerts",
     "backup_runs",
     "current_presence",
+    "reader_drafts",
 )
 
 _SCHEMA = (
@@ -98,7 +100,6 @@ _SCHEMA = (
         updated_at  TEXT NOT NULL
     )
     """,
-    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_plaksha_id ON users (plaksha_id) WHERE plaksha_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_users_name ON users (name)",
     "CREATE INDEX IF NOT EXISTS idx_users_is_temp ON users (is_temp)",
     """
@@ -140,7 +141,6 @@ _SCHEMA = (
         enrolled_at      TEXT NOT NULL
     )
     """,
-    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_credential_identifier ON credentials (credential_type, identifier)",
     "CREATE INDEX IF NOT EXISTS idx_credentials_user ON credentials (user_id)",
     """
     CREATE TABLE IF NOT EXISTS presence_log (
@@ -219,6 +219,20 @@ _SCHEMA = (
         user_id        INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
         checked_in_at  TEXT NOT NULL,
         updated_at     TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS reader_drafts (
+        id           TEXT PRIMARY KEY,
+        owner        TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'active',
+        stage        TEXT NOT NULL DEFAULT 'idle',
+        fp_template  INTEGER,
+        nfc_uid      TEXT,
+        user_id      INTEGER REFERENCES users (id),
+        message      TEXT NOT NULL DEFAULT '',
+        updated_at   TEXT NOT NULL,
+        expires_at   TEXT NOT NULL
     )
     """,
 )
@@ -307,15 +321,57 @@ def local_hhmm_to_iso(value: str) -> str:
     return _iso_from_dt(local.astimezone(timezone.utc))
 
 
-def iso_to_local_hhmm(value: str) -> str:
-    """Format a stored ISO timestamp as a local ``HH:MM`` display string."""
+def iso_to_local_hhmm(value: str, reference_time: datetime | str | None = None) -> str:
+    """Format a stored ISO timestamp as a local HH:MM display string.
+    If duration is 24+ hours, denotes with +1, +2 etc.
+    """
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt.astimezone().strftime("%H:%M")
+        time_str = dt.astimezone().strftime("%H:%M")
+        ref_dt = None
+        if reference_time is not None:
+            if isinstance(reference_time, str):
+                try:
+                    ref_dt = datetime.fromisoformat(reference_time.replace("Z", "+00:00"))
+                except Exception:
+                    pass
+            elif isinstance(reference_time, datetime):
+                ref_dt = reference_time
+        if ref_dt is None:
+            try:
+                import sys
+                presence_mod = sys.modules.get("presence")
+                if presence_mod and hasattr(presence_mod, "store"):
+                    mock_t = presence_mod.store.get_mock_time()
+                    mock_d = presence_mod.store.get_mock_date()
+                    if mock_t or mock_d:
+                        base_d = datetime.now().date()
+                        if mock_d:
+                            for fmt in ("%B %d, %Y", "%B %-d, %Y", "%b %d, %Y", "%Y-%m-%d"):
+                                try:
+                                    base_d = datetime.strptime(mock_d, fmt).date()
+                                    break
+                                except ValueError:
+                                    pass
+                        hour, minute = 0, 0
+                        if mock_t and ":" in mock_t:
+                            parts = mock_t.split(":")
+                            hour, minute = int(parts[0]), int(parts[1])
+                        local_mock = datetime.combine(base_d, datetime.min.time()).replace(hour=hour, minute=minute)
+                        ref_dt = local_mock.astimezone(timezone.utc)
+            except Exception:
+                pass
+        if ref_dt is None:
+            ref_dt = datetime.now(timezone.utc)
+        elif ref_dt.tzinfo is None:
+            ref_dt = ref_dt.astimezone(timezone.utc)
+        duration_sec = (ref_dt - dt).total_seconds()
+        if duration_sec >= 86400:
+            days = int(duration_sec // 86400)
+            return f"{time_str} +{days}"
+        return time_str
     except (ValueError, TypeError, AttributeError):
-        return "--:--"
-
-
+        return value if (isinstance(value, str) and ":" in value) else "--:--"
 def connect() -> sqlite3.Connection:
     """Open a new SQLite connection with sane defaults."""
     path = db_path()
@@ -357,15 +413,30 @@ def init_db() -> None:
                 db.execute("ALTER TABLE users ADD COLUMN email TEXT")
             if "phone" not in cols:
                 db.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+        for table in ('users', 'credentials'):
+            if 'deleted_at' not in {r['name'] for r in db.execute(f'PRAGMA table_info({table})')}:
+                db.execute(f'ALTER TABLE {table} ADD COLUMN deleted_at TEXT')
+        # Keep retired identities/registrations for immutable attendance history.
+        db.execute('DROP INDEX IF EXISTS uniq_plaksha_id')
+        db.execute('DROP INDEX IF EXISTS uniq_credential_identifier')
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS uniq_live_plaksha_id ON users (lower(trim(plaksha_id))) WHERE plaksha_id IS NOT NULL AND deleted_at IS NULL')
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS uniq_live_credential ON credentials (credential_type, identifier COLLATE NOCASE) WHERE deleted_at IS NULL')
     seed_default_access_areas()
 
 
 def seed_default_access_areas() -> None:
-    """Insert the canonical access areas if they are not already present."""
+    """Keep the two real access areas, auditing removal of legacy demo areas."""
     with get_db() as db:
+        unsupported = db.execute("SELECT * FROM access_areas WHERE code NOT IN ('indoor_lab', 'tool_area')").fetchall()
+        for area in unsupported:
+            grants = [dict(row) for row in db.execute('SELECT * FROM user_access_areas WHERE area_id=?', (area['id'],))]
+            db.execute("INSERT INTO admin_audit_log (occurred_at, actor, action, entity_type, entity_id, before, after) VALUES (?, 'system', 'remove_demo_area', 'access_area', ?, ?, NULL)",
+                       (utcnow_iso(), str(area['id']), json.dumps({'area': dict(area), 'grants': grants})))
+            db.execute('DELETE FROM user_access_areas WHERE area_id=?', (area['id'],))
+            db.execute('DELETE FROM access_areas WHERE id=?', (area['id'],))
         for code, label, order in DEFAULT_ACCESS_AREAS:
             db.execute(
-                "INSERT OR IGNORE INTO access_areas (code, label, sort_order) VALUES (?, ?, ?)",
+                "INSERT INTO access_areas (code, label, sort_order) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET label=excluded.label, sort_order=excluded.sort_order",
                 (code, label, order),
             )
 
@@ -523,16 +594,16 @@ def ensure_access_area(
 ) -> AccessArea:
     """Resolve a user-supplied area name to a stored ``AccessArea``.
 
-    Known aliases (``indoor_lab`` / ``tool_area`` and their spellings) always map
-    to the canonical rows. Unknown values are only inserted when
-    ``allow_create`` is true; the enrollment UI is expected to pass false and
-    offer only the pre-defined checkboxes.
+    Known aliases map to the two canonical rows. Unknown areas are rejected,
+    including legacy callers passing ``allow_create=True``.
     """
     key = (name or "").strip()
     if not key:
         raise ValueError("Access area name must not be empty")
 
-    code = ACCESS_AREA_ALIASES.get(key.lower(), _slugify(key))
+    code = ACCESS_AREA_ALIASES.get(key.lower())
+    if code is None:
+        raise KeyError(f"Unknown access area: {key!r}")
     with get_db() as db:
         row = db.execute("SELECT * FROM access_areas WHERE code = ?", (code,)).fetchone()
         if row:
@@ -596,14 +667,14 @@ def create_user(
 
 def get_user(user_id: int) -> Optional[User]:
     with get_db() as db:
-        row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        row = db.execute("SELECT * FROM users WHERE deleted_at IS NULL AND id = ?", (user_id,)).fetchone()
     return _user_from_row(row) if row else None
 
 
 def get_user_by_plaksha_id(plaksha_id: str) -> Optional[User]:
     with get_db() as db:
         row = db.execute(
-            "SELECT * FROM users WHERE plaksha_id = ?", (_clean(plaksha_id),)
+            "SELECT * FROM users WHERE deleted_at IS NULL AND plaksha_id = ?", (_clean(plaksha_id),)
         ).fetchone()
     return _user_from_row(row) if row else None
 
@@ -623,7 +694,7 @@ def get_active_user_by_name(name: str) -> Optional[User]:
 
 
 def list_users(*, include_inactive: bool = True, include_temp: bool = True) -> list[User]:
-    clauses, params = [], []
+    clauses, params = ["deleted_at IS NULL"], []
     if not include_inactive:
         clauses.append("status = 'active'")
     if not include_temp:
@@ -639,7 +710,7 @@ def list_users(*, include_inactive: bool = True, include_temp: bool = True) -> l
 def list_temp_users() -> list[User]:
     with get_db() as db:
         rows = db.execute(
-            "SELECT * FROM users WHERE is_temp = 1 ORDER BY created_at DESC, id DESC"
+            "SELECT * FROM users WHERE deleted_at IS NULL AND is_temp = 1 ORDER BY created_at DESC, id DESC"
         ).fetchall()
     return [_user_from_row(row) for row in rows]
 
@@ -681,7 +752,7 @@ def update_user(user_id: int, **fields: Any) -> Optional[User]:
     assignments = ", ".join(f"{column} = ?" for column in updates)
     with get_db() as db:
         db.execute(
-            f"UPDATE users SET {assignments} WHERE id = ?",
+            f"UPDATE users SET {assignments} WHERE deleted_at IS NULL AND id = ?",
             (*updates.values(), user_id),
         )
     return get_user(user_id)
@@ -696,6 +767,7 @@ def create_enrolment(
     phone: Optional[str] = None,
     access_area_ids: Sequence[int] = (),
     is_temp: bool = False,
+    credentials: Sequence[tuple[str, str]] = (),
 ) -> dict[str, Any]:
     clean_name = (name or "").strip()
     if not clean_name:
@@ -732,6 +804,21 @@ def create_enrolment(
         )
         user_id = cur.lastrowid
 
+        credential_records: list[dict[str, Any]] = []
+        for credential_type, identifier in credentials:
+            identifier = normalize_credential(credential_type, identifier)
+            cred_cur = conn.execute(
+                """INSERT INTO credentials
+                   (user_id, credential_type, identifier, template, is_active, enrolled_at)
+                   VALUES (?, ?, ?, NULL, 1, ?)""",
+                (user_id, credential_type, identifier, now),
+            )
+            credential_records.append({
+                "id": cred_cur.lastrowid, "user_id": user_id,
+                "credential_type": credential_type, "identifier": identifier,
+                "is_active": True, "enrolled_at": now,
+            })
+
         for aid in area_ids:
             conn.execute(
                 """
@@ -749,7 +836,18 @@ def create_enrolment(
             (now, str(user_id), clean_name),
         )
 
-        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if credential_records:
+            conn.execute(
+                """INSERT INTO admin_audit_log
+                   (occurred_at, actor, action, entity_type, entity_id, before, after)
+                   VALUES (?, 'admin', 'enrol_credentials', 'user', ?, NULL, ?)""",
+                (now, str(user_id), json.dumps([
+                    {"credential_type": c["credential_type"], "identifier": c["identifier"]}
+                    for c in credential_records
+                ])),
+            )
+
+        row = conn.execute("SELECT * FROM users WHERE deleted_at IS NULL AND id = ?", (user_id,)).fetchone()
         labels = _labels_for(conn, user_id)
 
     return {
@@ -763,7 +861,7 @@ def create_enrolment(
         "status": row["status"],
         "created_at": row["created_at"],
         "access": labels,
-        "credentials": [],
+        "credentials": credential_records,
         "is_inside": False,
         "is_banned": False,
     }
@@ -776,22 +874,22 @@ def set_user_status(user_id: int, status: str) -> Optional[User]:
 def deactivate_user(user_id: int) -> bool:
     """Retain identity, credentials and history when removing account access.
 
-    Permanent deletion is deliberately absent from the application repository
-    API; an operator must use SQLite directly for that maintenance operation.
+    People management separately retires accounts and credentials while keeping
+    immutable attendance history.
     """
     return set_user_status(user_id, "inactive") is not None
 
 
 def count_users() -> int:
     with get_db() as db:
-        return int(db.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+        return int(db.execute("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").fetchone()[0])
 
 
 def list_users_detailed(
     *, include_inactive: bool = True, include_temp: bool = True, limit: int = 200
 ) -> list[dict]:
     """Users with their granted areas, live presence and ban state."""
-    clauses, params = [], []
+    clauses, params = ["deleted_at IS NULL"], []
     if not include_inactive:
         clauses.append("status = 'active'")
     if not include_temp:
@@ -1011,6 +1109,7 @@ def enroll_credential(
     template: Optional[bytes] = None,
 ) -> Credential:
     """Register an NFC/fingerprint credential, rejecting duplicates."""
+    identifier = normalize_credential(credential_type, identifier)
     with get_db() as db:
         cur = db.execute(
             """
@@ -1027,7 +1126,7 @@ def enroll_credential(
 
 def get_credential(credential_id: int) -> Optional[Credential]:
     with get_db() as db:
-        row = db.execute("SELECT * FROM credentials WHERE id = ?", (credential_id,)).fetchone()
+        row = db.execute("SELECT * FROM credentials WHERE deleted_at IS NULL AND id = ?", (credential_id,)).fetchone()
     return _credential_from_row(row) if row else None
 
 
@@ -1037,7 +1136,7 @@ def resolve_user_by_credential(credential_type: str, identifier: str) -> Optiona
             """
             SELECT u.* FROM credentials c
             JOIN users u ON u.id = c.user_id
-            WHERE c.credential_type = ? AND c.identifier = ? AND c.is_active = 1
+            WHERE c.deleted_at IS NULL AND c.credential_type = ? AND c.identifier = ? AND c.is_active = 1
             LIMIT 1
             """,
             (credential_type, identifier),
@@ -1048,11 +1147,11 @@ def resolve_user_by_credential(credential_type: str, identifier: str) -> Optiona
 def list_credentials(*, user_id: Optional[int] = None) -> list[Credential]:
     if user_id is None:
         with get_db() as db:
-            rows = db.execute("SELECT * FROM credentials ORDER BY enrolled_at DESC").fetchall()
+            rows = db.execute("SELECT * FROM credentials WHERE deleted_at IS NULL ORDER BY enrolled_at DESC").fetchall()
     else:
         with get_db() as db:
             rows = db.execute(
-                "SELECT * FROM credentials WHERE user_id = ? ORDER BY enrolled_at DESC",
+                "SELECT * FROM credentials WHERE deleted_at IS NULL AND user_id = ? ORDER BY enrolled_at DESC",
                 (user_id,),
             ).fetchall()
     return [_credential_from_row(row) for row in rows]
@@ -1061,7 +1160,7 @@ def list_credentials(*, user_id: Optional[int] = None) -> list[Credential]:
 def set_credential_active(credential_id: int, is_active: bool) -> None:
     with get_db() as db:
         db.execute(
-            "UPDATE credentials SET is_active = ? WHERE id = ?",
+            "UPDATE credentials SET is_active = ? WHERE deleted_at IS NULL AND id = ?",
             (int(bool(is_active)), credential_id),
         )
 
@@ -1172,7 +1271,7 @@ def clear_current_presence() -> None:
         db.execute("DELETE FROM current_presence")
 
 
-def current_occupants() -> list[CurrentOccupant]:
+def current_occupants(reference_time: datetime | str | None = None) -> list[CurrentOccupant]:
     """Return everyone currently inside, newest check-in ordered last."""
     with get_db() as db:
         rows = db.execute(
@@ -1188,12 +1287,47 @@ def current_occupants() -> list[CurrentOccupant]:
             CurrentOccupant(
                 user=_user_from_row(row),
                 access=tuple(_labels_for(db, row["id"])),
-                checked_in=iso_to_local_hhmm(row["presence_checked_in_at"]),
+                checked_in=iso_to_local_hhmm(row["presence_checked_in_at"], reference_time=reference_time),
             )
             for row in rows
         ]
     return occupants
 
+
+
+
+def list_credentials_with_users(
+    *, credential_type: Optional[str] = None, query: Optional[str] = None,
+    limit: int = 100, offset: int = 0, sensor_templates: Sequence[int] | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT c.id, c.user_id, u.name AS user_name, u.plaksha_id, u.photo AS user_photo,
+                   c.credential_type, c.identifier, c.is_active, c.enrolled_at,
+                   LENGTH(c.template) AS template_bytes
+            FROM credentials c JOIN users u ON u.id = c.user_id
+            WHERE c.deleted_at IS NULL AND u.deleted_at IS NULL
+            ORDER BY c.enrolled_at DESC, c.id DESC
+        """).fetchall()
+    records = [dict(row) for row in rows]
+    assigned = {row['identifier'] for row in records if row['credential_type'] == 'fingerprint'}
+    slots = None if sensor_templates is None else set(sensor_templates)
+    for row in records:
+        row['on_sensor'] = (int(row['identifier'].split(':')[1]) in slots
+                            if slots is not None and row['credential_type'] == 'fingerprint'
+                            and row['identifier'].startswith('template:')
+                            and row['identifier'].split(':')[1].isdigit() else None)
+    for slot in sorted(slots or ()):
+        identifier = f'template:{slot}'
+        if identifier not in assigned:
+            records.append(dict(id=f'sensor:{slot}', user_id=None, user_name=None, plaksha_id=None,
+                                user_photo=None, credential_type='fingerprint', identifier=identifier,
+                                is_active=False, enrolled_at=None, template_bytes=None, on_sensor=True))
+    query = (query or '').strip().casefold()
+    records = [row for row in records if (not credential_type or row['credential_type'] == credential_type)
+               and (not query or any(query in str(row.get(key) or '').casefold()
+                                     for key in ('identifier', 'user_name', 'plaksha_id')))]
+    return records[offset:offset + limit], len(records)
 
 def presence_events_since(
     since_id: int = 0, max_age_seconds: float = 30.0
@@ -1320,6 +1454,76 @@ def get_credential_attempt(attempt_id: int) -> Optional[CredentialAttempt]:
             "SELECT * FROM credential_attempts WHERE id = ?", (attempt_id,)
         ).fetchone()
     return _attempt_from_row(row) if row else None
+
+
+def attach_credentials(user_id: int, credentials: Sequence[tuple[str, str]], *, actor: str = "admin") -> list[dict[str, Any]]:
+    """Atomically attach credential identifiers to an active user and audit it."""
+    now = utcnow_iso()
+    records: list[dict[str, Any]] = []
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        user = conn.execute("SELECT id FROM users WHERE id=? AND status='active'", (user_id,)).fetchone()
+        if user is None:
+            raise ValueError("User is missing or inactive")
+        for kind, identifier in credentials:
+            if kind not in ("nfc", "fingerprint") or not isinstance(identifier, str) or not identifier.strip():
+                raise ValueError("Credential type and identifier are required")
+            value = normalize_credential(kind, identifier)
+            cur = conn.execute(
+                "INSERT INTO credentials (user_id, credential_type, identifier, template, is_active, enrolled_at) VALUES (?, ?, ?, NULL, 1, ?)",
+                (user_id, kind, value, now),
+            )
+            records.append({"id": cur.lastrowid, "user_id": user_id, "credential_type": kind,
+                            "identifier": value, "is_active": True, "enrolled_at": now})
+        conn.execute(
+            "INSERT INTO admin_audit_log (occurred_at, actor, action, entity_type, entity_id, before, after) VALUES (?, ?, 'attach_credentials', 'user', ?, NULL, ?)",
+            (now, actor, str(user_id), json.dumps([{"credential_type": r["credential_type"], "identifier": r["identifier"]} for r in records])),
+        )
+    return records
+
+
+def create_draft(owner: str, user_id: Optional[int] = None, ttl: int = 1800) -> str:
+    """Create the single durable reader-enrolment lease and return its token."""
+    token = secrets.token_urlsafe(24)
+    now = datetime.now(timezone.utc)
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        active = conn.execute("SELECT id FROM reader_drafts WHERE status IN ('active','complete','cleanup') LIMIT 1").fetchone()
+        if active:
+            raise RuntimeError("A reader draft lease already exists")
+        if user_id is not None and not conn.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+            raise ValueError("Unknown user_id")
+        conn.execute(
+            "INSERT INTO reader_drafts (id, owner, user_id, updated_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+            (token, owner, user_id, _iso_from_dt(now), _iso_from_dt(now + timedelta(seconds=max(1, int(ttl))))),
+        )
+    return token
+
+
+def get_draft(draft_id: str, owner: Optional[str] = None) -> Optional[dict[str, Any]]:
+    with get_db() as conn:
+        if owner is None:
+            row = conn.execute("SELECT * FROM reader_drafts WHERE id=?", (draft_id,)).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM reader_drafts WHERE id=? AND owner=?", (draft_id, owner)).fetchone()
+    return dict(row) if row else None
+
+
+def update_draft(draft_id: str, **fields: Any) -> Optional[dict[str, Any]]:
+    allowed = {"status", "stage", "fp_template", "nfc_uid", "user_id", "message", "expires_at"}
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    updates["updated_at"] = utcnow_iso()
+    assignments = ", ".join(f"{key}=?" for key in updates)
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(f"UPDATE reader_drafts SET {assignments} WHERE id=?", (*updates.values(), draft_id))
+    return get_draft(draft_id)
+
+
+def list_pending_drafts() -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM reader_drafts WHERE status NOT IN ('committed','cancelled') ORDER BY updated_at").fetchall()
+    return [dict(row) for row in rows]
 
 
 def list_credential_attempts(*, limit: int = 100) -> list[CredentialAttempt]:
@@ -1602,6 +1806,7 @@ DEFAULT_SCREEN_SETTINGS: dict[str, Any] = {
     "show_check_in": True,
     "show_names": True,
     "show_feedback": True,
+    "date_size": 18,
 }
 
 
@@ -1616,7 +1821,10 @@ def get_screen_settings(screen: str = "display") -> dict[str, Any]:
             stored = {}
         if isinstance(stored, dict):
             settings.update({key: value for key, value in stored.items() if key in DEFAULT_SCREEN_SETTINGS})
-    return {flag: bool(settings[flag]) for flag in _SCREEN_FLAGS}
+    result = {flag: bool(settings[flag]) for flag in _SCREEN_FLAGS}
+    value = settings.get('date_size')
+    result['date_size'] = max(14, min(32, value)) if type(value) is int else 18
+    return result
 
 
 def set_screen_settings(screen: str, settings: dict[str, Any]) -> dict[str, Any]:
@@ -1624,6 +1832,11 @@ def set_screen_settings(screen: str, settings: dict[str, Any]) -> dict[str, Any]
     merged = get_screen_settings(screen)
     if isinstance(settings, dict):
         merged.update({key: settings[key] for key in _SCREEN_FLAGS if key in settings})
+    if isinstance(settings, dict) and 'date_size' in settings:
+        value = settings['date_size']
+        if type(value) is not int or not 14 <= value <= 32:
+            raise ValueError('Date size must be between 14 and 32 pixels')
+        merged['date_size'] = value
     for flag in _SCREEN_FLAGS:
         merged[flag] = bool(merged[flag])
     set_setting(f"display_settings_{screen}", json.dumps(merged))
@@ -1654,3 +1867,30 @@ def _clean(value: Optional[str]) -> Optional[str]:
         return None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def normalize_credential(kind: str, identifier: str) -> str:
+    """Canonicalize physical UIDs/template references, retaining legacy IDs."""
+    import re
+    if kind not in ('nfc', 'fingerprint') or not isinstance(identifier, str) or not identifier.strip():
+        raise ValueError('Credential type and identifier are required')
+    value = identifier.strip()
+    if kind == 'nfc':
+        compact = re.sub(r'[:\s-]', '', value)
+        if len(compact) in (8, 14, 20) and re.fullmatch(r'[a-fA-F0-9]+', compact):
+            return compact.upper()
+    if kind == 'fingerprint' and re.fullmatch(r'(?:template:)?[0-9]+', value, re.I):
+        number = int(value.split(':')[-1])
+        if not 1 <= number <= 1000:
+            raise ValueError('Fingerprint template ID must be between 1 and 1000')
+        return f'template:{number}'
+    return value
+
+
+def duplicate_error(error: Exception) -> str:
+    message = str(error)
+    if 'credential' in message:
+        return 'This NFC UID or fingerprint is already enrolled'
+    if 'plaksha' in message:
+        return 'This Plaksha ID is already enrolled'
+    return 'This record conflicts with an existing entry'

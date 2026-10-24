@@ -12,8 +12,15 @@ const status = document.querySelector('#settings-status');
 const dirty = new Set();
 let screen = 'display';
 let saving = false;
+let cardScale = 100;
+let clockScale = 100;
+let headerHeight = 25;
 function render() {
   const cfg = settings[screen];
+  const dateSize = document.querySelector('#adjust-date-size');
+  dateSize.value = cfg.date_size;
+  dateSize.disabled = saving;
+  outline.querySelector('.outline-date').style.flexBasis = `${cfg.date_size / 4}%`;
   const hasHeader = cfg.show_greeter || cfg.show_date || cfg.show_clock || cfg.show_digital_time;
   const timeUnits = (cfg.show_date ? 1 : 0) + (cfg.show_clock ? 4 : 0) + (cfg.show_digital_time ? 1 : 0);
   outline.dataset.screen = screen;
@@ -34,13 +41,20 @@ function render() {
   grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
   grid.querySelector('.outline-greeter-zone').style.gridColumn = `1 / span ${columns - 1}`;
   grid.querySelector('.outline-clock-stack').style.gridColumn = String(columns);
-  const headerShare = hasHeader && rows > 1 ? (fullHeader ? 25 : 100 / rows) : 0;
+  outline.style.setProperty('--card-scale', `${cardScale / 100}`);
+  outline.style.setProperty('--clock-scale', `${clockScale / 100}`);
+  const headerShare = hasHeader && rows > 1 ? (fullHeader ? headerHeight : 100 / rows) : 0;
   const tracks = headerShare ? [headerShare, ...Array(rows - 1).fill((100 - headerShare) / (rows - 1))] : Array(rows).fill(100 / rows);
   grid.style.gridTemplateRows = tracks.map(x => `minmax(0, ${x}fr)`).join(' ');
   document.querySelector("#settings-reset").disabled = saving;
   apply.disabled = saving || !dirty.has(screen);
   target.disabled = saving;
 }
+document.querySelector('#adjust-date-size').addEventListener('input', e => {
+  if (!e.target.checkValidity()) return;
+  settings[screen].date_size = Number(e.target.value);
+  changed();
+});
 function changed() { dirty.add(screen); status.textContent = 'Unsaved changes'; render(); }
 for (const node of document.querySelectorAll('[data-setting]')) {
   node.addEventListener('change', () => { settings[screen][node.dataset.setting] = node.checked; changed(); });
@@ -59,3 +73,88 @@ apply.addEventListener('click', async () => {
   finally { saving = false; apply.loading = false; render(); }
 });
 render();
+
+
+function setupAdjustments() {
+  const cardSlider = document.getElementById('adjust-card-scale');
+  const cardVal = document.getElementById('adjust-card-scale-val');
+  if (cardSlider) {
+    cardSlider.addEventListener('input', () => {
+      cardScale = Number(cardSlider.value);
+      if (cardVal) cardVal.textContent = `${cardScale}%`;
+      render();
+    });
+  }
+
+  const clockSlider = document.getElementById('adjust-clock-size');
+  const clockVal = document.getElementById('adjust-clock-size-val');
+  if (clockSlider) {
+    clockSlider.addEventListener('input', () => {
+      clockScale = Number(clockSlider.value);
+      if (clockVal) clockVal.textContent = `${clockScale}%`;
+      render();
+    });
+  }
+
+  const headerSlider = document.getElementById('adjust-header-height');
+  const headerVal = document.getElementById('adjust-header-height-val');
+  if (headerSlider) {
+    headerSlider.addEventListener('input', () => {
+      headerHeight = Number(headerSlider.value);
+      if (headerVal) headerVal.textContent = `${headerHeight}%`;
+      render();
+    });
+  }
+
+  // Drag handle for resizing the screen outline
+  const outlineHandle = document.querySelector('.outline-resize-handle');
+  if (outlineHandle && outline) {
+    let startX, startY, startW, startH;
+    const onMove = e => {
+      const newW = Math.max(300, startW + (e.clientX - startX));
+      const newH = Math.max(200, startH + (e.clientY - startY));
+      outline.style.width = `${newW}px`;
+      outline.style.height = `${newH}px`;
+      outline.style.maxHeight = 'none';
+      outline.style.aspectRatio = 'auto';
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    outlineHandle.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      startX = e.clientX;
+      startY = e.clientY;
+      startW = outline.offsetWidth;
+      startH = outline.offsetHeight;
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+  }
+
+  // Drag handle for adjusting greeter zone split
+  const zoneHandle = document.querySelector('.zone-resize-handle');
+  if (zoneHandle) {
+    let startX, startHeader;
+    const onZoneMove = e => {
+      const delta = (e.clientX - startX) / 10;
+      headerHeight = Math.max(15, Math.min(45, Math.round(startHeader + delta)));
+      if (headerSlider) headerSlider.value = headerHeight;
+      if (headerVal) headerVal.textContent = `${headerHeight}%`;
+      render();
+    };
+    const onZoneUp = () => {
+      window.removeEventListener('pointermove', onZoneMove);
+      window.removeEventListener('pointerup', onZoneUp);
+    };
+    zoneHandle.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      startX = e.clientX;
+      startHeader = headerHeight;
+      window.addEventListener('pointermove', onZoneMove);
+      window.addEventListener('pointerup', onZoneUp);
+    });
+  }
+}
+setupAdjustments();

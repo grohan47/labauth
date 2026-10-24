@@ -53,6 +53,29 @@ def _grid_density(count: int) -> str:
     return "3rows"
 
 
+def _temp_register_card(density: str = "3rows") -> str:
+    spacing = {
+        "1row": "sbb-card-spacing-xxs",
+        "2rows": "sbb-card-spacing-xxs",
+        "3rows": "sbb-card-spacing-4x-xxs",
+    }.get(density, "sbb-card-spacing-xxs")
+    content = """
+        <div class="card-content card-content--temp-register">
+            <div class="temp-register-plus-wrapper">
+                <svg class="temp-register-plus-icon" viewBox="0 0 32 32" width="28" height="28" fill="currentColor" aria-hidden="true">
+                    <rect x="14" y="7" width="4" height="18" rx="0.5"></rect>
+                    <rect x="7" y="14" width="18" height="4" rx="0.5"></rect>
+                </svg>
+            </div>
+            <p class="temp-register-text">
+                <span class="temp-register-heading">Not Enrolled?</span>
+                <span class="temp-register-sub">Click here to register your presence temporarily</span>
+            </p>
+        </div>
+    """
+    return f"""<div class="person-card person-card--temp-register person-card--{density} {spacing}" role="button" tabindex="0" aria-label="Register presence temporarily">{content}</div>"""
+
+
 def _person_card(
     person: PersonInside,
     *,
@@ -79,17 +102,36 @@ def _person_card(
         </figure>
     """ if show_photos else ""
 
-    tools_markup = f"""
-        <div class="access-list access-list--grid access-list--tools-{min(tool_count, 4)}">
-            {access}
-        </div>
-    """ if (show_tools and access) else ""
+    if person.is_temp:
+        tools_markup = f"""
+            <div class="temp-exit-container">
+                <button type="button" class="temp-exit-btn" data-person-name="{escape(person.name)}" aria-label="Sign out {escape(person.name)}">
+                    <svg class="temp-exit-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                    <span>Sign out</span>
+                </button>
+            </div>
+        """
+        subtitle_markup = '<div class="person-subtitle">Temporary</div>'
+    else:
+        tools_markup = f"""
+            <div class="access-list access-list--grid access-list--tools-{min(tool_count, 4)}">
+                {access}
+            </div>
+        """ if (show_tools and access) else ""
+        subtitle_markup = ""
 
     content = f"""
         <div class="card-content">
         <div class="card-id-header">
             {photo_markup}
-            {title(person.name, level=2, visual_level=visual_level, css_class="person-name")}
+            <div class="person-name-group">
+                {title(person.name, level=2, visual_level=visual_level, css_class="person-name")}
+                {subtitle_markup}
+            </div>
         </div>
         <div class="card-id-body">
             <div class="check-in">
@@ -101,9 +143,11 @@ def _person_card(
         </div>
     """
     extra_classes = []
+    if person.is_temp:
+        extra_classes.append("person-card--temp")
     if not show_photos:
         extra_classes.append("person-card--no-photo")
-    if not show_tools:
+    if not show_tools and not person.is_temp:
         extra_classes.append("person-card--no-tools")
     extra_str = f" {' '.join(extra_classes)}" if extra_classes else ""
     return card(content, css_class=f"person-card person-card--{density} person-card--tools-{min(tool_count, 4)} {spacing}{extra_str}")
@@ -119,7 +163,7 @@ def _people_grid(
     cards = "".join(
         _person_card(person, density=density, show_photos=show_photos, show_tools=show_tools)
         for person in people
-    )
+    ) + _temp_register_card(density=density)
     return f"""
         <div class="people-grid people-grid--{density}">{cards}</div>
     """
@@ -172,28 +216,31 @@ def _presence_content(
     show_photos = True if settings is None else bool(settings.get("show_photos", True))
     show_tools = True if settings is None else bool(settings.get("show_tools", True))
     if settings is not None:
-        cards = "".join(_person_card(p, density="3rows", show_photos=show_photos, show_tools=show_tools) for p in people)
+        cards = "".join(_person_card(p, density="3rows", show_photos=show_photos, show_tools=show_tools) for p in people) + _temp_register_card(density="3rows")
         return f'<div class="configured-cards">{cards}</div>'
     max_rows = 3
 
     page_limit = 4 if max_rows == 1 else (8 if max_rows == 2 else 12)
+    total_count = len(people) + 1
 
-    if len(people) <= page_limit:
+    if total_count <= page_limit:
         if max_rows == 1:
             density = "1row"
         elif max_rows == 2:
-            density = "1row" if len(people) <= 4 else "2rows"
+            density = "1row" if total_count <= 4 else "2rows"
         else:
-            density = _grid_density(len(people))
+            density = _grid_density(total_count)
         return _people_grid(people, density=density, show_photos=show_photos, show_tools=show_tools)
 
     slice_size = 4 if max_rows == 1 else 8
-    pages = tuple(
-        people[start : start + slice_size]
-        for start in range(0, len(people), slice_size)
-    )
+    all_cards = [_person_card(p, density="2rows" if max_rows > 1 else "1row", show_photos=show_photos, show_tools=show_tools) for p in people]
+    all_cards.append(_temp_register_card(density="2rows" if max_rows > 1 else "1row"))
+    pages = [all_cards[start : start + slice_size] for start in range(0, len(all_cards), slice_size)]
     views = "".join(
-        _carousel_view(page, idx, idx == 0, show_photos=show_photos, show_tools=show_tools, max_rows=max_rows)
+        f'<div class="carousel-view{" is-active" if idx == 0 else ""}" data-page="{idx}">'
+        + f'<div class="carousel-row carousel-row--top">{"".join(page[:4])}</div>'
+        + (f'<div class="carousel-row carousel-row--bottom">{"".join(page[4:8])}</div>' if len(page) > 4 else '')
+        + '</div>'
         for idx, page in enumerate(pages)
     )
     return f'<div class="carousel-stage">{views}</div>'
@@ -253,7 +300,7 @@ def build_display(*, admin: bool = False) -> None:
                     'cross-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="#000" fill-rule="evenodd" d="m12.707 12 5.647-5.647-.707-.707L12 11.293 6.354 5.646l-.708.707L11.293 12l-5.647 5.646.708.707L12 12.707l5.647 5.646.707-.707z" clip-rule="evenodd"/></svg>'
                 }};
                 globalThis.sbbConfig = globalThis.sbbConfig || {{}};
-                globalThis.sbbConfig.icon = globalThis.sbbConfig.icon || {{}};
+                globalThis.sbbConfig.icon = globalThis.sbbConfig || {{}};
                 globalThis.sbbConfig.icon.interceptor = function(context) {{
                     if (context && context.name && BUILTIN_ICONS[context.name]) {{
                         return BUILTIN_ICONS[context.name];
@@ -329,6 +376,38 @@ def build_display(*, admin: bool = False) -> None:
                 hidden=True,
             )
             ui.html(ticker, sanitize=False)
+
+            ui.html('''
+                <div id="temp-register-modal" class="temp-modal-backdrop" hidden>
+                  <div class="temp-modal-card" role="dialog" aria-modal="true" aria-labelledby="temp-modal-title">
+                    <div class="temp-modal-header">
+                      <h2 id="temp-modal-title" class="temp-modal-heading">Temporary Registration</h2>
+                      <button type="button" class="temp-modal-close" id="temp-modal-close-btn" aria-label="Close dialog">&times;</button>
+                    </div>
+                    <form id="temp-register-form" class="temp-modal-form" novalidate>
+                      <p class="temp-modal-description">Not Enrolled? Register your presence temporarily.</p>
+                      <div id="temp-form-error" class="temp-form-error" role="alert" hidden></div>
+                      <div class="temp-field-group">
+                        <label for="temp-input-name" class="temp-field-label">Full Name <span class="required">*</span></label>
+                        <input type="text" id="temp-input-name" name="name" class="temp-field-input" placeholder="Full name" required autocomplete="name" />
+                      </div>
+                      <div class="temp-field-group">
+                        <label for="temp-input-uid" class="temp-field-label">Plaksha UID <span class="required">*</span></label>
+                        <input type="text" id="temp-input-uid" name="plaksha_id" class="temp-field-input" placeholder="Plaksha UID" required autocomplete="off" />
+                      </div>
+                      <div class="temp-field-group">
+                        <label for="temp-input-phone" class="temp-field-label">Phone Number <span class="required">*</span></label>
+                        <input type="tel" id="temp-input-phone" name="phone" class="temp-field-input" placeholder="Phone number" required autocomplete="tel" />
+                      </div>
+                      <div class="temp-modal-actions">
+                        <button type="button" id="temp-modal-cancel-btn" class="temp-btn temp-btn--secondary">Cancel</button>
+                        <button type="submit" id="temp-modal-submit-btn" class="temp-btn temp-btn--primary">Check In</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+            ''', sanitize=False)
+
 
     client = ui.context.client
 

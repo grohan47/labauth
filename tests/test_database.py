@@ -96,12 +96,31 @@ def test_fresh_database_is_empty():
         os.environ["LABAUTH_DB_PATH"] = original
 
 
+def test_only_real_access_areas_survive_legacy_demo_data():
+    user = db.create_user('Area migration')
+    with db.get_db() as conn:
+        area = conn.execute("INSERT INTO access_areas (code,label) VALUES ('laser_cutter','Laser cutter')").lastrowid
+        conn.execute("INSERT INTO user_access_areas (user_id,area_id,granted_at) VALUES (?,?,?)", (user.id, area, db.utcnow_iso()))
+    db.init_db()
+    assert {a.code for a in db.list_access_areas()} == {'indoor_lab', 'tool_area'}
+    assert db.get_user_access_area_labels(user.id) == []
+    with db.get_db() as conn:
+        audit = conn.execute("SELECT before FROM admin_audit_log WHERE action='remove_demo_area' AND entity_id=?", (str(area),)).fetchone()
+    assert audit and 'Laser cutter' in audit['before'] and str(user.id) in audit['before']
+    try:
+        db.ensure_access_area('Laser cutter', allow_create=True)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError('Invented area accepted')
+
+
 def test_check_in_and_check_out_roundtrip():
-    person = presence.store.check_in("Elena Rossi", access=("Lab interior", "CNC mill"), checked_in="09:15")
+    person = presence.store.check_in("Elena Rossi", access=("Lab interior", "Tool Area"), checked_in="09:15")
     assert person.checked_in == "09:15"
     assert person.user_id is not None
     assert db.is_user_inside(person.user_id)
-    assert {"Indoor lab", "CNC mill"} <= set(person.access)
+    assert {"Indoor lab", "Tool Area"} <= set(person.access)
 
     people = {p.name: p for p in presence.store.get_people()}
     assert "Elena Rossi" in people

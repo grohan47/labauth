@@ -6,6 +6,9 @@ let isFadingGreeting = false;
 let isFadingCarousel = false;
 let lastPeriod = null;
 let themeOverride = null;
+let lastReaderEventId = 0;
+const seenReaderEventIds = new Set();
+let readerEventsPolling = false;
 
 const GREETINGS = {
   morning: {
@@ -403,6 +406,7 @@ function applyDisplaySettings(cfg, html) {
   if (!frame || !cfg) return;
   displaySettings = cfg;
   frame.dataset.settings = JSON.stringify(cfg);
+  frame.style.setProperty('--display-date-size', `${cfg.date_size || 18}px`);
   for (const node of frame.querySelectorAll('[data-visible]')) node.hidden = !cfg[node.dataset.visible];
   const timeUnits = (cfg.show_date ? 1 : 0) + (cfg.show_clock ? 4 : 0) + (cfg.show_digital_time ? 1 : 0);
   const hasHeader = cfg.show_greeter || timeUnits;
@@ -652,8 +656,24 @@ if (typeof globalThis !== 'undefined') {
 }
 
 function renderAlertCard(event) {
+  const isReaderFailure = event.type === 'ERROR';
+  const isReaderCheck = event.type === 'CHECK';
+  if (isReaderFailure) {
+    const source = String(event.source || '').toLowerCase();
+    const label = source === 'fingerprint' ? 'Fingerprint' : source === 'nfc' ? 'Card' : 'Reader';
+    const title = event.title || `${label} not found`;
+    const message = event.message || 'Please try again.';
+    const fallback = SBB_BUILTIN_ICONS['cross-small'] || '';
+    return `
+      <sbb-card color="white" class="auth-alert-card auth-alert-card--reader sbb-card-spacing-l${isReaderFailure ? ' auth-alert-card--error' : ''}" role="document">
+        ${isReaderFailure ? `<div class="reader-alert-icon"><sbb-icon name="cross-small" aria-hidden="true">${fallback}</sbb-icon></div>` : ''}
+        <sbb-title level="1" visual-level="2" class="reader-alert-title">${escapeHtml(title)}</sbb-title>
+        ${message ? `<p class="reader-alert-message">${escapeHtml(message)}</p>` : ''}
+      </sbb-card>`;
+  }
   const isSmallScreen = window.innerWidth < 640;
-  const isOut = event.type === 'OUT';
+  const isOut = event.type === 'OUT' || (isReaderCheck && !event.person?.is_inside);
+  const cardType = isOut ? 'OUT' : 'IN';
   const iconName = isOut
     ? (isSmallScreen ? 'exit-small' : 'exit-medium')
     : (isSmallScreen ? 'entrance-small' : 'entrance-medium');
@@ -661,7 +681,7 @@ function renderAlertCard(event) {
   const name = person.name || 'User';
   const photo = person.photo || '/static/portraits/default.svg';
   const access = Array.isArray(person.access) ? person.access : [];
-  const checkIn = event.check_in || person.checked_in || '--:--';
+  const checkIn = event.check_in || (typeof person.checked_in === 'string' ? person.checked_in : null) || '--:--';
   const checkOut = event.check_out || '--:--';
 
   const toolCount = access.length;
@@ -672,9 +692,9 @@ function renderAlertCard(event) {
   const svgFallback = SBB_BUILTIN_ICONS[iconName] || '';
 
   return `
-    <div class="auth-alert-card" role="document">
+    <sbb-card color="white" class="auth-alert-card sbb-card-spacing-xxs" role="document">
       <div class="alert-card-bar">
-        <span class="alert-bar-label">${escapeHtml(event.type)}</span>
+        <span class="alert-bar-label">${cardType}</span>
         <sbb-icon name="${iconName}" class="alert-bar-icon" aria-hidden="true">${svgFallback}</sbb-icon>
       </div>
       <div class="alert-card-content">
@@ -703,7 +723,7 @@ function renderAlertCard(event) {
           </div>
         </div>
       </div>
-    </div>
+    </sbb-card>
   `;
 }
 
@@ -760,7 +780,18 @@ function processAlertQueue() {
 
 function handleAuthEvent(event) {
   if (displaySettings && !displaySettings.show_feedback) return;
-  if (!event || !event.type || !event.person) return;
+  if (!event || !event.type) return;
+  if (event.type === 'ERROR') {
+    // Reader failures have no person; route them to the reader ID namespace.
+    // Numeric IDs from the presence feed still advance that feed's cursor.
+    if (event.id !== undefined && event.id !== null && Number.isFinite(Number(event.id))) {
+      lastSeenEventId = Math.max(lastSeenEventId, Number(event.id));
+    }
+    handleReaderEvent(event);
+    return;
+  }
+  // CHECK feedback must always resolve to a person before it can be shown.
+  if (!event.person) return;
   if (event.id) {
     if (seenEventIds.has(event.id)) {
       return;
@@ -786,6 +817,56 @@ function handleAuthEvent(event) {
     currentAlertTimer = setTimeout(() => {
       processAlertQueue();
     }, remaining);
+  }
+}
+
+function handleReaderEvent(event) {
+  if (displaySettings && !displaySettings.show_feedback) return;
+  if (!event || !['CHECK', 'ERROR'].includes(event.type)) return;
+  if (event.type === 'CHECK' && !event.person) return;
+  if (event.id !== undefined && event.id !== null) {
+    const rawId = String(event.id);
+    const key = rawId.startsWith('reader-') ? rawId : `reader-${rawId}`;
+    if (seenReaderEventIds.has(key)) return;
+    seenReaderEventIds.add(key);
+    if (seenReaderEventIds.size > 200) {
+      const ids = Array.from(seenReaderEventIds);
+      seenReaderEventIds.clear();
+      ids.slice(-100).forEach((id) => seenReaderEventIds.add(id));
+    }
+  }
+  if (alertQueue.length >= 20) alertQueue.shift();
+  alertQueue.push(event);
+  if (!isDisplayingAlert) processAlertQueue();
+  else {
+    const remaining = Math.max(0, 1_000 - (Date.now() - currentAlertStartTime));
+    clearTimeout(currentAlertTimer);
+    currentAlertTimer = setTimeout(processAlertQueue, remaining);
+  }
+}
+
+async function pollReaderEvents() {
+  if (readerEventsPolling) return;
+  readerEventsPolling = true;
+  try {
+    const res = await fetch(`/api/readers/events?since=${lastReaderEventId}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    const cursor = Number(data.cursor);
+    if (Number.isFinite(cursor) && cursor < lastReaderEventId) {
+      // The reader service restarted and its in-memory sequence began again.
+      seenReaderEventIds.clear();
+    }
+    if (Array.isArray(data.events)) {
+      for (const event of data.events) {
+        handleReaderEvent(event);
+      }
+    }
+    if (Number.isFinite(cursor)) lastReaderEventId = cursor;
+  } catch (err) {
+    // Retry on the next display tick.
+  } finally {
+    readerEventsPolling = false;
   }
 }
 
@@ -989,7 +1070,7 @@ window.setTestOccupants = function (count) {
     name: `User ${i + 1}`,
     photo: '/static/portraits/default.svg',
     checked_in: `09:${String(10 + i).padStart(2, '0')}`,
-    access: ['Lab interior', 'Tool area'],
+    access: ['Indoor lab', 'Tool Area'],
   });
 
   const createCard = (p, density) => {
@@ -1213,7 +1294,7 @@ async function start() {
         name: urlParams.get('name') || 'Elena Rossi',
         photo: urlParams.get('photo') || '/static/portraits/default.svg',
         checked_in: urlParams.get('in_time') || '09:15',
-        access: ['Lab interior', 'CNC mill', 'Laser cutter'],
+        access: ['Indoor lab', 'Tool Area'],
       },
       check_in: urlParams.get('in_time') || '09:15',
     });
@@ -1224,7 +1305,7 @@ async function start() {
         name: urlParams.get('name') || 'Elena Rossi',
         photo: urlParams.get('photo') || '/static/portraits/default.svg',
         checked_in: urlParams.get('in_time') || '09:15',
-        access: ['Lab interior', 'CNC mill', 'Laser cutter'],
+        access: ['Indoor lab', 'Tool Area'],
       },
       check_in: urlParams.get('in_time') || '09:15',
       check_out: urlParams.get('out_time') || '17:30',
@@ -1271,6 +1352,7 @@ async function start() {
     if (nowTimestamp - lastPollTime >= 400) {
       lastPollTime = nowTimestamp;
       pollAuthEvents();
+      pollReaderEvents();
     }
 
     // 4. Greeting cycle (every 10s)
@@ -1293,4 +1375,118 @@ async function start() {
   });
 }
 
+
+function setupTempRegistration() {
+  function openModal() {
+    const modal = document.getElementById('temp-register-modal');
+    if (!modal) return;
+    modal.hidden = false;
+    modal.classList.add('is-active');
+    const errorEl = document.getElementById('temp-form-error');
+    if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+    const form = document.getElementById('temp-register-form');
+    if (form) form.reset();
+    const nameInput = document.getElementById('temp-input-name');
+    if (nameInput) setTimeout(() => nameInput.focus(), 50);
+  }
+
+  function closeModal() {
+    const modal = document.getElementById('temp-register-modal');
+    if (!modal) return;
+    modal.hidden = true;
+    modal.classList.remove('is-active');
+    const errorEl = document.getElementById('temp-form-error');
+    if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+  }
+
+  document.addEventListener('submit', async e => {
+    if (e.target && e.target.id === 'temp-register-form') {
+      e.preventDefault();
+      const errorEl = document.getElementById('temp-form-error');
+      const submitBtn = document.getElementById('temp-modal-submit-btn');
+      const nameInput = document.getElementById('temp-input-name');
+      const uidInput = document.getElementById('temp-input-uid');
+      const phoneInput = document.getElementById('temp-input-phone');
+
+      const name = nameInput ? nameInput.value.trim() : '';
+      const plaksha_id = uidInput ? uidInput.value.trim() : '';
+      const phone = phoneInput ? phoneInput.value.trim() : '';
+
+      if (!name || !plaksha_id || !phone) {
+        if (errorEl) {
+          errorEl.textContent = 'All fields (Name, Plaksha UID, Phone) are mandatory.';
+          errorEl.hidden = false;
+        }
+        return;
+      }
+
+      if (submitBtn) submitBtn.disabled = true;
+      if (errorEl) errorEl.hidden = true;
+
+      try {
+        const res = await fetch('/api/presence/check-in', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, plaksha_id, phone, is_temp: true })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || data.detail || 'Could not register presence.');
+        }
+        closeModal();
+        await refreshPresence();
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = err.message || 'Error registering presence.';
+          errorEl.hidden = false;
+        }
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    }
+  });
+
+  document.addEventListener('click', async e => {
+    const tempCard = e.target.closest('.person-card--temp-register');
+    if (tempCard) {
+      e.preventDefault();
+      openModal();
+      return;
+    }
+
+    if (e.target.closest('#temp-modal-close-btn') || e.target.closest('#temp-modal-cancel-btn')) {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+
+    const modal = document.getElementById('temp-register-modal');
+    if (modal && e.target === modal) {
+      closeModal();
+      return;
+    }
+
+    const exitBtn = e.target.closest('.temp-exit-btn');
+    if (exitBtn) {
+      e.preventDefault();
+      const personName = exitBtn.dataset.personName;
+      if (!personName) return;
+      exitBtn.disabled = true;
+      try {
+        await fetch('/api/presence/check-out', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: personName })
+        });
+        await refreshPresence();
+      } catch (err) {
+        console.error('Check-out error:', err);
+      } finally {
+        exitBtn.disabled = false;
+      }
+    }
+  });
+}
+
+setupTempRegistration();
 start();

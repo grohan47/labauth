@@ -17,3 +17,6 @@ build/
 # Local runtime data (SQLite database and backup snapshots)
 data/
 backups/
+
+# Locally uploaded enrollment/profile portraits
+src/static/portraits/portrait_*.png

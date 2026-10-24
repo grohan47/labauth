@@ -183,32 +183,49 @@ class PresenceStore:
         *,
         is_temp: bool = False,
         plaksha_id: str | None = None,
+        phone: str | None = None,
     ) -> PersonInside:
         name = (name or "").strip()
-        access = tuple(item.strip() for item in access if item and item.strip())
+        if is_temp:
+            access = ()
+        else:
+            access = tuple(item.strip() for item in access if item and item.strip())
+            for area in access:
+                db.ensure_access_area(area, allow_create=False)
         with self._lock:
-            user = db.get_active_user_by_name(name)
-            if user is None and plaksha_id:
+            user = None
+            if plaksha_id:
                 user = db.get_user_by_plaksha_id(plaksha_id)
+            if user is None:
+                user = db.get_active_user_by_name(name)
             if user is None:
                 user = db.create_user(
                     name,
                     plaksha_id=plaksha_id,
+                    phone=phone,
                     photo=photo or DEFAULT_PORTRAIT,
                     is_temp=is_temp,
                 )
             else:
                 updates: dict[str, object] = {}
-                if photo and photo != user.photo:
+                if photo and photo != user.photo and photo != DEFAULT_PORTRAIT:
                     updates["photo"] = photo
                 if plaksha_id and not user.plaksha_id:
                     updates["plaksha_id"] = plaksha_id
+                if phone and phone != user.phone:
+                    updates["phone"] = phone
+                if is_temp and user.is_temp:
+                    if name and name != user.name:
+                        updates["name"] = name
                 if updates:
                     db.update_user(user.id, **updates)
                     user = db.get_user(user.id)
 
-            db.set_user_access_areas(user.id, access, allow_create=True)
-            labels = tuple(db.get_user_access_area_labels(user.id))
+            if not user.is_temp:
+                db.set_user_access_areas(user.id, access, allow_create=True)
+                labels = tuple(db.get_user_access_area_labels(user.id))
+            else:
+                labels = ()
             occurred_at = db.utcnow_iso()
             presence_at = db.local_hhmm_to_iso(checked_in) if checked_in else occurred_at
             display_time = db.iso_to_local_hhmm(presence_at)

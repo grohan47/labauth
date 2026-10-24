@@ -123,9 +123,9 @@ erDiagram
 | `access_areas` | The pre-defined, admin-managed access areas (seeded with `indoor_lab`, `tool_area`). |
 | `user_access_areas` | Many-to-many grant of access areas to a user. |
 | `bans` | Ban timelines. An open ban is a row with `unbanned_at IS NULL`; only one open ban per user is allowed. |
-| `credentials` | NFC UIDs and fingerprint templates, mapped to a user. `UNIQUE (credential_type, identifier)` rejects duplicates. |
+| `credentials` | NFC UIDs and fingerprint templates, mapped to a user. Partial uniqueness on live registrations rejects duplicate NFC UIDs and fingerprint references. |
 | `presence_log` | The immutable in/out log; the authoritative record of real check-in/check-out events. |
-| `credential_attempts` | Every authentication attempt, successful or not, with the raw reader message preserved in `message`. |
+| `credential_attempts` | Every authentication attempt, successful or not, with the credential identifier, normalized outcome and optional reason message. Raw fingerprint images/templates are not stored here. |
 | `admin_audit_log` | Consequential admin actions (user added/deleted, display settings changed, bans, etc.) with optional before/after snapshots. |
 | `settings` | Persisted display configuration, e.g. per-screen visibility flags. |
 | `alerts` | Operator announcements shown on both displays. `severity` is `critical`, `caution` or `info`; `expires_at` is an optional lifetime, `NULL` meaning it stays until deleted. |
@@ -152,7 +152,7 @@ rm -f data/labauth.db data/labauth.db-wal data/labauth.db-shm
   column. Bans are temporal rows, so "banned" is derived (an open ban exists)
   rather than stored twice.
 * **`id` is the DB-generated unique ID.** `plaksha_id` is an optional external
-  university ID, unique only when present (partial unique index).
+  university ID, unique without regard to case among non-deleted users when present (partial unique index).
 * **Access area policy.** The canonical areas are seeded and the frontend is
   expected to offer them as checkboxes. `ensure_access_area(..., allow_create=False)`
   enforces the pre-defined set; the develop/test API still allows new areas so
@@ -234,12 +234,15 @@ Uploaded and captured photos are centre-cropped in the browser, decoded and
 normalised as PNG on the server, and stored as photo paths. Failed saves remove
 their new photo file. Pillow provides image validation.
 
-Both fingerprint and NFC readers currently show **Reader unavailable** and can
-be skipped. Skip remains available regardless of connection or enrolment state,
-including once real readers are integrated. No fingerprint success, NFC identifier
-or credential is simulated.
-The API rejects browser-supplied credential claims. Driver integration and
-fingerprint consistency verification are deferred until real readers are added.
+Reader enrollment is backed by an owner-bound server session. Fingerprint
+template references and NFC UIDs are committed to `credentials` only from that
+session; browser fields cannot assert reader success or supply credential
+identifiers. Identity-only enrollment remains available without attached reader
+hardware. See [PICO_BACKEND.md](PICO_BACKEND.md) for API, lease, cleanup and
+hardware status details. The current firmware's PN532 path is still a stub and
+reports `ABSENT`; the fingerprint path has a live USB handshake and switch
+acknowledgment check, but successful biometric identification has not been
+established by that evidence.
 
 The theme follows the same server clock as the main display: light from 06:00
 until 18:00, dark otherwise. It refreshes in place without clearing the draft.
@@ -273,3 +276,36 @@ same single-line ticker at the top of the screen: active alerts are ordered by
 severity, cross-fade between one another, and reveal a message that does not fit
 on one line a line at a time with a short scroll between lines. The ticker is an
 overlay and has no visibility toggle, so it never reflows the presence layout.
+
+
+### People management
+
+`/people` replaces Search in the admin panel; `/search` remains an alias. All
+registered people, including inactive accounts, appear in a searchable table
+with per-row checkboxes and a bulk-delete action. Profiles support editing
+identity/contact fields, photo, account/type, access grants, credential
+identifiers/status and ban details. Optional fields, grants and credentials can
+be removed; a ban is lifted while its timeline remains visible. Database IDs
+and event timestamps remain read-only.
+
+Mutations require an admin session and same-origin requests. Each change is
+validated and audited in the same transaction. Deleting a person retires the
+account and credentials using `deleted_at`, removes access and checks them out
+if present. Attendance and its linked identity/credential rows remain available
+to Logs. Retired external IDs and credentials may be enrolled again. Names are
+not unique. NFC UIDs are canonical uppercase hex; numeric fingerprint references
+are canonical `template:N` identifiers. Inactive registrations still reserve
+their identifiers until deleted.
+
+Fingerprint deletion runs through the reader's serialized maintenance queue,
+pauses attendance, and waits for `EVT FP DELETED` (or a confirmed empty slot)
+before retiring the database registration. Keep the reader connected; failure
+keeps the registration. The reader returns to its prior mode and switch state.
+Edits/deletions cannot interrupt an active enrolment session. Credential reference
+editing changes the mapping; it does not capture a new fingerprint.
+
+The one-time pre-live reset on 24 October 2026 removed test people, grants,
+attendance, attempts, audit entries and reader drafts from the local database,
+while preserving settings/access areas. The SQLite backup is
+`data/backups/pre-live-20261024-234349.db`. The sensor returned `fp=FAULT` and
+`ERR FP NOT_READY`, so templates on the physical sensor were not cleared.

@@ -31,6 +31,26 @@ ignored by Git. Only the generated bundle is needed at runtime; `node_modules/`
 can be removed after building. If the local bundle is absent, the app uses CDN
 loading.
 
+## Hardware firmware
+
+The Pico bridge firmware, reader state machines and USB line protocol live in
+[`firmware/labauth_pico`](firmware/labauth_pico/README.md). The fingerprint
+backend and enrollment lease are documented in
+[`docs/PICO_BACKEND.md`](docs/PICO_BACKEND.md). The fingerprint path is
+integrated over USB serial. The current live check confirmed the USB handshake,
+mode and switch acknowledgments, and firmware reporting `led=OFF` after disable;
+it did not establish a successful fingerprint match. The PN532 I2C reader is
+reserved behind `ENABLE_PN532` and currently reports `ABSENT`.
+
+Configure the Pico's serial device before starting LabAuth:
+
+```bash
+LABAUTH_PICO_PORT=/dev/ttyACM0 uv run python src/main.py
+```
+
+Use `LABAUTH_PICO_PORT=auto` only when exactly one Pico is connected. Port,
+device ID and service behavior are described in the backend guide.
+
 ## Data and backups
 
 Presence, users, credentials and logs are stored in a local SQLite database

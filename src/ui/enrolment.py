@@ -163,7 +163,7 @@ def build_enrolment_page() -> None:
         </section>
         <section id="step-2" class="enrolment-step reader-step" aria-labelledby="heading-2" hidden>
           {title("Fingerprint", level=1, visual_level=2, html_id="heading-2", tabindex="-1")}
-          <div class="reader-stage" id="fp-stage" role="region" aria-live="polite" title="Click to simulate touch">
+          <div class="reader-stage" id="fp-stage" role="region" aria-live="polite">
             <div id="fp-animation" class="reader-anim-wrap">
               {icon("fingerprint-medium", css_class="reader-icon", aria_hidden="true")}
             </div>
@@ -173,17 +173,21 @@ def build_enrolment_page() -> None:
                 <path class="reader-checkmark-check" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" d="M36 62 L52 78 L84 44" />
               </svg>
             </div>
-            {title("Reader ready", level=2, visual_level=4, html_id="fp-status-title")}
-            <p class="reader-subtitle" id="fp-status-desc">Touch the biometric sensor to register fingerprint</p>
+            {title("Reader unavailable", level=2, visual_level=4, html_id="fp-status-title")}
+            <p class="reader-subtitle" id="fp-status-desc">Connect a fingerprint reader to continue</p>
+            <p class="reader-subtitle" id="fp-guidance" hidden></p>
+            <div id="fp-error" role="alert" hidden></div>
           </div>
           <nav class="enrolment-actions" aria-label="Step actions">
             {button("Back", html_id="btn-step2-back", size="l", icon_name="arrow-left-small")}
+            {button("Start", html_id="btn-fp-start", size="l", icon_name="fingerprint-small", hidden=True)}
+            {button("Finish learning", html_id="btn-fp-finish", size="l", icon_name="tick-small", hidden=True)}
             {button("Skip", html_id="btn-fp-skip", size="l", icon_name="arrow-right-small", icon_placement="end")}
           </nav>
         </section>
         <section id="step-3" class="enrolment-step reader-step" aria-labelledby="heading-3" hidden>
           {title("NFC card", level=1, visual_level=2, html_id="heading-3", tabindex="-1")}
-          <div class="reader-stage" id="nfc-stage" role="region" aria-live="polite" title="Click to simulate card tap">
+          <div class="reader-stage" id="nfc-stage" role="region" aria-live="polite">
             <div id="nfc-tap-animation" class="nfc-tap-animation" aria-hidden="true" data-loaded="true">
               <img class="nfc-tap-gif nfc-tap-gif--dark" src="/static/animations/nfc-tap-dark.gif" alt="Tap card against contactless transit reader">
               <img class="nfc-tap-gif nfc-tap-gif--light" src="/static/animations/nfc-tap-light.gif" alt="Tap card against contactless transit reader">
@@ -194,11 +198,13 @@ def build_enrolment_page() -> None:
                 <path class="reader-checkmark-check" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" d="M36 62 L52 78 L84 44" />
               </svg>
             </div>
-            {title("Hold card to reader", level=2, visual_level=4, html_id="nfc-status-title")}
-            <p class="reader-subtitle" id="nfc-status-desc">Tap your card on the contactless reader</p>
+            {title("Reader unavailable", level=2, visual_level=4, html_id="nfc-status-title")}
+            <p class="reader-subtitle" id="nfc-status-desc">Connect an NFC reader to continue</p>
+            <div id="nfc-error" role="alert" hidden></div>
           </div>
           <nav class="enrolment-actions" aria-label="Step actions">
             {button("Back", html_id="btn-step3-back", size="l", icon_name="arrow-left-small")}
+            {button("Start", html_id="btn-nfc-start", size="l", icon_name="swisspass-small", hidden=True)}
             {button("Skip", html_id="btn-nfc-skip", size="l", icon_name="arrow-right-small", icon_placement="end")}
           </nav>
         </section>

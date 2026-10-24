@@ -15,8 +15,8 @@ const ready = async () => {
   const defaultPhoto = '/static/portraits/default.svg';
   let photo = defaultPhoto, step = 1, saved = false, saving = false, stream = null, cameraGeneration = 0;
   let themeTimer = null, themeRequest = false;
-  let fpStatus = 'waiting';
-  let nfcStatus = 'waiting';
+  let readerDraft = null, readerBusy = false, readerPoll = null, readerCreatePromise = null;
+  let readerStatusPolling = false, readerGeneration = 0;
   let enrolledFp = false;
   let enrolledNfcUid = null;
 
@@ -75,6 +75,11 @@ const ready = async () => {
     $('enrolment-progress-fill').style.width = `${progress}%`;
     $(`heading-${next}`).focus({preventScroll: true});
     window.scrollTo({top: 0, behavior: 'instant'});
+    ensureReaderPolling();
+    if (next === 2 && !readerDraft) ensureReaderDraft().catch(err => {
+      renderReaderDraft({id: null, status: 'failed', stage: 'error', readers: {ready: false}, message: err.message || 'Reader unavailable'});
+      error('fp-error', err.message || 'Reader unavailable');
+    });
   }
 
   function setPhoto(src) {
@@ -83,7 +88,7 @@ const ready = async () => {
     $('btn-remove-photo').hidden = src === defaultPhoto;
   }
 
-  function review(record, access) {
+  function review(record, access, savedCredentials = null) {
     $('final-card-name').textContent = record.name;
     $('final-card-photo').src = record.photo;
     $('final-demo-id').textContent = record.plaksha_id || '—';
@@ -95,6 +100,10 @@ const ready = async () => {
       chip.textContent = label; $('final-card-chips').append(chip);
     });
 
+    if (savedCredentials) {
+      enrolledFp = savedCredentials.some(c => ['fingerprint', 'fp'].includes(String(c.credential_type || c.type || '').toLowerCase()));
+      enrolledNfcUid = savedCredentials.find(c => ['nfc', 'card'].includes(String(c.credential_type || c.type || '').toLowerCase()))?.identifier || null;
+    }
     if (enrolledFp) {
       $('final-cred-fp').querySelector('.credential-state').textContent = 'Enrolled';
       $('final-cred-fp').style.color = 'var(--sbb-color-red, #eb0000)';
@@ -112,105 +121,124 @@ const ready = async () => {
     }
   }
 
-  // --- Biometric & NFC Reader States with Large Checkmark Sync ---
-  function setFingerprintStatus(status) {
-    fpStatus = status;
-    const anim = $('fp-animation');
-    const checkmark = $('fp-checkmark');
-    const title = $('fp-status-title');
-    const desc = $('fp-status-desc');
-    const skipBtn = $('btn-fp-skip');
-
-    if (status === 'complete' || status === 'verified') {
-      if (anim) anim.hidden = true;
-      if (checkmark) checkmark.hidden = false;
-      if (title) title.textContent = 'Fingerprint Enrolled';
-      if (desc) desc.textContent = 'Biometric template registered';
-      if (skipBtn) {
-        skipBtn.textContent = 'Next';
-        skipBtn.setAttribute('icon-name', 'arrow-right-small');
-      }
-      enrolledFp = true;
-    } else if (status === 'unavailable') {
-      if (anim) anim.hidden = false;
-      if (checkmark) checkmark.hidden = true;
-      if (title) title.textContent = 'Reader unavailable';
-      if (desc) desc.textContent = 'Hardware not detected';
-      if (skipBtn) {
-        skipBtn.textContent = 'Skip';
-        skipBtn.setAttribute('icon-name', 'arrow-right-small');
-      }
-      enrolledFp = false;
+  function renderReaderDraft(draft) {
+    readerDraft = draft.id ? draft : null;
+    const fpHealth = String(draft.readers?.fp || '').toUpperCase();
+    const fpReady = draft.readers?.connected && draft.readers?.ready && draft.readers?.fp_enabled
+      && ['READY', 'BUSY'].includes(fpHealth);
+    const fpTitle = $('fp-status-title'), fpDesc = $('fp-status-desc');
+    $('fp-guidance').hidden = true;
+    $('fp-checkmark').hidden = draft.fp_template == null;
+    $('btn-fp-skip').textContent = draft.fp_template != null ? 'Next' : 'Skip';
+    $('fp-animation').hidden = !$('fp-checkmark').hidden;
+    $('btn-fp-start').hidden = !fpReady || ['fingerprint','learning'].includes(draft.stage) || draft.fp_template != null;
+    $('btn-fp-start').disabled = readerBusy;
+    $('btn-fp-finish').hidden = draft.stage !== 'learning';
+    $('btn-fp-finish').disabled = readerBusy;
+    if (draft.fp_template != null) {
+      fpTitle.textContent = 'Fingerprint enrolled'; fpDesc.textContent = 'Fingerprint template registered'; enrolledFp = true;
+    } else if (!fpReady) {
+      fpTitle.textContent = 'Reader unavailable'; fpDesc.textContent = 'Connect a fingerprint reader to continue'; enrolledFp = false;
     } else {
-      // 'waiting' / scanning state
-      if (anim) anim.hidden = false;
-      if (checkmark) checkmark.hidden = true;
-      if (title) title.textContent = 'Reader ready';
-      if (desc) desc.textContent = 'Touch the biometric sensor to register fingerprint';
-      if (skipBtn) {
-        skipBtn.textContent = 'Skip';
-        skipBtn.setAttribute('icon-name', 'arrow-right-small');
-      }
       enrolledFp = false;
+      fpTitle.textContent = draft.stage === 'learning' ? 'Finish learning' : draft.stage === 'fingerprint' ? 'Place finger on sensor' : 'Fingerprint reader ready';
+      fpDesc.textContent = draft.message || (draft.stage === 'idle' ? 'Start fingerprint enrolment' : '');
+      const progress = draft.progress || {};
+      const updateText = typeof progress.update === 'string' ? progress.update : '';
+      const rawGuide = `${progress.hint || ''} ${progress.phase || ''} ${JSON.stringify(progress.matches || '')} ${updateText}`.toLowerCase();
+      const guide = /left/.test(rawGuide) ? 'Move your finger slightly left'
+        : /right/.test(rawGuide) ? 'Move your finger slightly right'
+          : /center|centre|overlap|middle/.test(rawGuide) ? 'Cover the centre of the sensor'
+            : progress.hint || updateText || (progress.phase && String(progress.phase).replaceAll('_', ' ')) || '';
+      if (guide) { $('fp-guidance').textContent = guide; $('fp-guidance').hidden = false; }
+    }
+    const nfcHealth = String(draft.readers?.nfc || '').toUpperCase();
+    const nfcReady = draft.readers?.connected && draft.readers?.ready && draft.readers?.nfc_enabled
+      && ['READY', 'BUSY'].includes(nfcHealth);
+    const nfcTitle = $('nfc-status-title'), nfcDesc = $('nfc-status-desc');
+    $('nfc-checkmark').hidden = !draft.nfc_uid;
+    $('btn-nfc-skip').textContent = draft.nfc_uid ? 'Next' : 'Skip';
+    $('nfc-tap-animation').hidden = !$('nfc-checkmark').hidden;
+    $('btn-nfc-start').hidden = !nfcReady || draft.nfc_uid != null;
+    $('btn-nfc-start').disabled = readerBusy;
+    if (draft.nfc_uid) { nfcTitle.textContent = 'Card registered'; nfcDesc.textContent = 'NFC card enrolled'; enrolledNfcUid = draft.nfc_uid; }
+    else if (!nfcReady) { nfcTitle.textContent = 'Reader unavailable'; nfcDesc.textContent = 'Connect an NFC reader to continue'; enrolledNfcUid = null; }
+    else { nfcTitle.textContent = 'Hold card to reader'; nfcDesc.textContent = draft.message || 'Tap your card on the contactless reader'; enrolledNfcUid = null; }
+    if (draft.status === 'failed' || draft.stage === 'error') {
+      const msg = draft.message || 'Reader operation failed. Retry or skip.';
+      error('fp-error', msg); error('nfc-error', msg);
+    } else { error('fp-error'); error('nfc-error'); }
+  }
+
+  async function readerRequest(path, method = 'GET', body) {
+    const response = await fetch(path, {method, credentials: 'same-origin', cache: 'no-store',
+      headers: body ? {'Content-Type': 'application/json'} : undefined,
+      body: body ? JSON.stringify(body) : undefined});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Reader unavailable');
+    return data;
+  }
+  const readerPath = () => readerDraft ? `/api/readers/enrolments/${encodeURIComponent(readerDraft.id)}` : null;
+  async function ensureReaderDraft() {
+    if (readerDraft) return readerDraft;
+    if (readerCreatePromise) return readerCreatePromise;
+    readerCreatePromise = (async () => {
+      const draft = await readerRequest('/api/readers/enrolments', 'POST', {});
+      renderReaderDraft(draft); ensureReaderPolling(); return draft;
+    })();
+    try { return await readerCreatePromise; }
+    finally { readerCreatePromise = null; }
+  }
+  async function readerAction(action, source = 'fp-error') {
+    if (readerBusy) return false;
+    readerGeneration += 1;
+    readerBusy = true; $('btn-fp-start').disabled = true; $('btn-fp-finish').disabled = true; $('btn-nfc-start').disabled = true;
+    $('btn-fp-skip').disabled = true; $('btn-nfc-skip').disabled = true;
+    error(source);
+    try {
+      if (action === 'fingerprint' || action === 'nfc') await ensureReaderDraft();
+      if (!readerDraft) return false;
+      const draft = await readerRequest(readerPath(), 'POST', {action});
+      renderReaderDraft(draft); return true;
+    } catch (err) {
+      error(source, err.message || 'Reader unavailable');
+      if (!readerDraft) {
+        renderReaderDraft({id: null, status: 'failed', stage: 'error', readers: {ready: false}, message: err.message});
+      }
+      return false;
+    } finally {
+      readerBusy = false;
+      $('btn-fp-start').disabled = false; $('btn-fp-finish').disabled = false; $('btn-nfc-start').disabled = false;
+      $('btn-fp-skip').disabled = false; $('btn-nfc-skip').disabled = false;
     }
   }
-
-  function setNfcStatus(status, uid) {
-    nfcStatus = status;
-    const anim = $('nfc-tap-animation');
-    const checkmark = $('nfc-checkmark');
-    const title = $('nfc-status-title');
-    const desc = $('nfc-status-desc');
-    const skipBtn = $('btn-nfc-skip');
-
-    if (status === 'complete' || status === 'verified' || status === 'tapped') {
-      const cardUid = uid || 'C8:CB:70:69:F0';
-      if (anim) anim.hidden = true;
-      if (checkmark) checkmark.hidden = false;
-      if (title) title.textContent = 'Card Registered';
-      if (desc) desc.textContent = `Unique UID: ${cardUid}`;
-      if (skipBtn) {
-        skipBtn.textContent = 'Next';
-        skipBtn.setAttribute('icon-name', 'arrow-right-small');
+  async function pollReader() {
+    if (!readerDraft || readerBusy || readerStatusPolling || document.hidden || saved) return;
+    readerStatusPolling = true;
+    const generation = readerGeneration;
+    try {
+      const draft = await readerRequest(readerPath());
+      if (!readerBusy && generation === readerGeneration && !saved) renderReaderDraft(draft);
+    } catch (err) {
+      if (readerDraft && !readerBusy && generation === readerGeneration) {
+        error(step === 2 ? 'fp-error' : 'nfc-error', err.message || 'Reader status unavailable');
       }
-      enrolledNfcUid = cardUid;
-    } else if (status === 'unavailable') {
-      if (anim) anim.hidden = false;
-      if (checkmark) checkmark.hidden = true;
-      if (title) title.textContent = 'Reader unavailable';
-      if (desc) desc.textContent = 'Tap reader not detected';
-      if (skipBtn) {
-        skipBtn.textContent = 'Skip';
-        skipBtn.setAttribute('icon-name', 'arrow-right-small');
-      }
-      enrolledNfcUid = null;
-    } else {
-      // 'waiting' state
-      if (anim) anim.hidden = false;
-      if (checkmark) checkmark.hidden = true;
-      if (title) title.textContent = 'Hold card to reader';
-      if (desc) desc.textContent = 'Tap your card on the contactless reader';
-      if (skipBtn) {
-        skipBtn.textContent = 'Skip';
-        skipBtn.setAttribute('icon-name', 'arrow-right-small');
-      }
-      enrolledNfcUid = null;
+    } finally { readerStatusPolling = false; }
+  }
+  function ensureReaderPolling() {
+    clearInterval(readerPoll); readerPoll = null;
+    if (readerDraft && !saved) { pollReader(); readerPoll = setInterval(pollReader, 400); }
+  }
+  async function cancelReaderDraft(beacon = false) {
+    readerGeneration += 1;
+    clearInterval(readerPoll); readerPoll = null;
+    if (!readerDraft || saved) return;
+    const url = readerPath(); const payload = JSON.stringify({action: 'cancel'});
+    if (beacon && navigator.sendBeacon) {
+      navigator.sendBeacon(url, new Blob([payload], {type: 'application/json'})); readerDraft = null; return;
     }
-  }
-
-  window.setFingerprintStatus = setFingerprintStatus;
-  window.setNfcStatus = setNfcStatus;
-
-  // Click on stage toggles simulation so user can easily test the transitions and checkmarks
-  if ($('fp-stage')) {
-    $('fp-stage').addEventListener('click', () => {
-      setFingerprintStatus(fpStatus === 'complete' ? 'waiting' : 'complete');
-    });
-  }
-  if ($('nfc-stage')) {
-    $('nfc-stage').addEventListener('click', () => {
-      setNfcStatus(nfcStatus === 'complete' ? 'waiting' : 'complete');
-    });
+    try { await readerRequest(url, 'POST', {action: 'cancel'}); } catch { /* expiry remains server-owned */ }
+    readerDraft = null;
   }
 
   // --- Step 1 Form Actions ---
@@ -228,10 +256,21 @@ const ready = async () => {
   });
 
   $('btn-step2-back').addEventListener('click', () => setStep(1));
-  $('btn-fp-skip').addEventListener('click', () => setStep(3));
+  $('btn-fp-start').addEventListener('click', () => readerAction('fingerprint'));
+  $('btn-fp-finish').addEventListener('click', () => readerAction('finish'));
+  $('btn-fp-skip').addEventListener('click', async () => {
+    if (readerBusy) return;
+    if (readerCreatePromise) await readerCreatePromise.catch(() => null);
+    if (readerDraft && readerDraft.fp_template == null && !await readerAction('skip_fingerprint')) return;
+    setStep(3);
+  });
 
   $('btn-step3-back').addEventListener('click', () => setStep(2));
-  $('btn-nfc-skip').addEventListener('click', () => {
+  $('btn-nfc-start').addEventListener('click', () => readerAction('nfc', 'nfc-error'));
+  $('btn-nfc-skip').addEventListener('click', async () => {
+    if (readerBusy) return;
+    if (readerCreatePromise) await readerCreatePromise.catch(() => null);
+    if (readerDraft && !readerDraft.nfc_uid && !await readerAction('skip_nfc', 'nfc-error')) return;
     review(values(), [...document.querySelectorAll('sbb-checkbox[name="access"]')].filter(c => c.checked).map(c => c.textContent.trim()));
     setStep(4);
   });
@@ -242,10 +281,12 @@ const ready = async () => {
   $('enrolment-close-btn').addEventListener('click', event => {
     stopCamera();
     if (dirty()) { event.preventDefault(); $('discard-dialog').open(); }
+    else cancelReaderDraft(true);
   });
 
   window.addEventListener('beforeunload', event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
-  $('discard-dialog').querySelector('sbb-button-link').addEventListener('click', () => { saved = true; stopCamera(); });
+  $('discard-dialog').querySelector('sbb-button-link').addEventListener('click', () => { stopCamera(); cancelReaderDraft(true); saved = true; });
+  window.addEventListener('pagehide', () => { if (!saved) cancelReaderDraft(true); });
 
   // --- Step 4 Save to Database ---
   $('btn-finish-enrolment').addEventListener('click', async () => {
@@ -257,12 +298,13 @@ const ready = async () => {
       const response = await fetch('/api/enrolment/complete', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(values())
+        body: JSON.stringify({...values(), ...(readerDraft ? {reader_session: readerDraft.id} : {})})
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || 'Could not save. Try again.');
       saved = true;
-      review(result.user, result.user.access);
+      clearInterval(readerPoll); readerPoll = null;
+      review(result.user, result.user.access, result.user.credentials || result.credentials || []);
       const card = document.querySelector('.final-card').cloneNode(true);
       card.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
       $('saved-card-host').replaceChildren(card);
@@ -277,11 +319,11 @@ const ready = async () => {
 
   // --- Enrol Another User ---
   $('btn-enrol-another').addEventListener('click', () => {
+    cancelReaderDraft(); readerDraft = null; enrolledFp = false; enrolledNfcUid = null;
     $('identity-form').reset();
     document.querySelectorAll('sbb-checkbox[name="access"]').forEach(c => c.checked = false);
     setPhoto(defaultPhoto);
-    setFingerprintStatus('waiting');
-    setNfcStatus('waiting');
+    renderReaderDraft({id: null, status: 'active', stage: 'idle', readers: {ready: false}});
     saved = false;
     $('btn-step1-next').hidden = true;
     $('saved-card-host').replaceChildren();

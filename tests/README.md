@@ -256,3 +256,21 @@ time, summary and sample alerts on/off. Includes five greeting languages and
 light/dark themes. Verifies clock height against the greeting, containment,
 centering, bold digital time, unobscured summary, card fit and browser errors.
 Screenshots and measurements are saved in `/tmp/labauth-clock-layout-qa`.
+
+## People management
+
+```bash
+uv run python tests/test_people.py
+uv run python tests/test_user_search.py
+uv run python tests/test_user_search_browser.py
+uv run python tests/test_pico_service.py
+```
+
+All use disposable databases. People browser QA covers the table, pagination,
+selection, profile edits, duplicate errors, optional-field removal, access,
+credential editing/deletion, ban editing/lifting, single/bulk deletion, keyboard
+activation, responsive themes, authentication and same-origin enforcement. It
+also checks that a disconnected fingerprint reader prevents deletion. Screenshots
+are written to `/tmp/labauth-people-qa`. The PTY reader tests confirm deletion
+commands and completion events against emulated hardware, including preserving
+reader mode; they do not prove physical sensor deletion.

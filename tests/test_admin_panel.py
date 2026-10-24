@@ -11,7 +11,7 @@ Verifies:
    - 5 large rectangular Lyne cards in a coordinate grid:
      1) Enrollment (fingerprint-medium icon) -> /enrollment
      2) Logs (document-text-medium icon) -> /logs
-     3) Search (magnifying-glass-medium icon) -> /search
+     3) People (user-group-medium icon) -> /people
      4) Alerts (sign-exclamation-point-medium icon) -> /admin-alerts-dialog
      5) Display settings (controls-medium icon) -> /admin/display-settings
 4. Alerts dialog: typing, broadcasting, and clearing an alert via /api/alerts.
@@ -292,7 +292,7 @@ async def test_browser_admin_panel():
         labels = [c["label"] for c in panel_info["cardDetails"]]
         assert "Enrollment" in labels, "Enrollment card missing!"
         assert "Logs" in labels, "Logs card missing!"
-        assert "Search" in labels, "Search card missing!"
+        assert "People" in labels, "People card missing!"
         assert "Alerts" in labels, "Alerts card missing!"
         assert "Display settings" in labels, "Display settings card missing!"
 
@@ -305,9 +305,9 @@ async def test_browser_admin_panel():
         assert logs_card["href"] == "/logs", f"Expected /logs href, got {logs_card['href']}"
         assert "document-text" in logs_card["iconName"], f"Expected document-text icon, got {logs_card['iconName']}"
 
-        search_card = next(c for c in panel_info["cardDetails"] if c["label"] == "Search")
-        assert search_card["href"] == "/search", f"Expected /search href, got {search_card['href']}"
-        assert "magnifying-glass" in search_card["iconName"], f"Expected magnifying-glass icon, got {search_card['iconName']}"
+        search_card = next(c for c in panel_info["cardDetails"] if c["label"] == "People")
+        assert search_card["href"] == "/people", f"Expected /people href, got {search_card['href']}"
+        assert "user-group" in search_card["iconName"], f"Expected user-group icon, got {search_card['iconName']}"
 
         alerts_card = next(c for c in panel_info["cardDetails"] if c["label"] == "Alerts")
         assert "sign-exclamation-point" in alerts_card["iconName"], f"Expected sign-exclamation-point icon, got {alerts_card['iconName']}"

@@ -1,4 +1,6 @@
 import json
+import asyncio
+import hashlib
 import sys
 import time
 from datetime import datetime
@@ -23,16 +25,104 @@ from ui.display_settings import build_display_settings_page
 from ui.enrolment import build_enrolment_page
 from ui.logs import build_logs_page
 from ui.search import build_search_page
+from ui.credentials import build_credentials_page
 from services.user_queries import search_users, user_details
+from services.people import edit_person, delete_people, MissingPerson
 from services.log_queries import query_visits, query_sql, database_schema
+from services.pico import PicoService, ReaderError
 from ui.lyne import asset_url, button, container, element, form_field, lyne_assets
 
 SESSION_COOKIE_NAME = "labauth_admin_session"
+readers = PicoService()
+app.on_startup(readers.start)
+app.on_shutdown(readers.stop)
 
 
 def request_has_valid_admin_session(request: Request) -> bool:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     return is_admin_session_valid(token)
+
+
+def reader_owner(request: Request) -> str:
+    return hashlib.sha256(request.cookies.get(SESSION_COOKIE_NAME, '').encode()).hexdigest()
+
+
+def reader_guard(request: Request):
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({'detail': 'Admin session required'}, status_code=401)
+    origin = request.headers.get('origin')
+    if request.method != 'GET' and origin and origin.rstrip('/') != str(request.base_url).rstrip('/'):
+        return JSONResponse({'detail': 'Same-origin request required'}, status_code=403)
+    return None
+
+
+@app.get('/api/readers/events')
+def api_reader_events(request: Request):
+    try:
+        since = max(0, int(request.query_params.get('since', '0')))
+    except ValueError:
+        since = 0
+    return JSONResponse(readers.events(since), headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/readers/status')
+def api_reader_status(request: Request):
+    return reader_guard(request) or JSONResponse(readers.status(), headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/readers/control')
+async def api_reader_control(request: Request):
+    if denied := reader_guard(request):
+        return denied
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) not in ({'mode'}, {'reader', 'enabled'}):
+            raise ReaderError('Choose a reader switch or mode')
+        result = await asyncio.to_thread(readers.call, 'control', **body)
+        return JSONResponse(result)
+    except (ValueError, RuntimeError) as exc:
+        return JSONResponse({'detail': str(exc)}, status_code=409)
+
+
+@app.post('/api/readers/enrolments')
+async def api_reader_enrolment_start(request: Request):
+    if denied := reader_guard(request):
+        return denied
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) - {'user_id'}:
+            raise ReaderError('Invalid enrollment request')
+        result = await asyncio.to_thread(readers.call, 'begin', owner=reader_owner(request), **body)
+        return JSONResponse(result)
+    except (ValueError, RuntimeError) as exc:
+        return JSONResponse({'detail': str(exc)}, status_code=409)
+
+
+@app.get('/api/readers/enrolments/{session_id}')
+def api_reader_enrolment_state(session_id: str, request: Request):
+    if denied := reader_guard(request):
+        return denied
+    try:
+        return JSONResponse(readers.draft(session_id, reader_owner(request)), headers={'Cache-Control': 'no-store'})
+    except ReaderError as exc:
+        return JSONResponse({'detail': str(exc)}, status_code=404)
+
+
+@app.post('/api/readers/enrolments/{session_id}')
+async def api_reader_enrolment_action(session_id: str, request: Request):
+    if denied := reader_guard(request):
+        return denied
+    if db.get_draft(session_id, reader_owner(request)) is None:
+        return JSONResponse({'detail': 'Enrollment session not found'}, status_code=404)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) != {'action'} or not isinstance(body['action'], str):
+            raise ReaderError('Invalid enrollment action')
+        result = await asyncio.to_thread(readers.call, 'action', owner=reader_owner(request),
+                                         session=session_id, operation=body['action'])
+        return JSONResponse(result)
+    except (ValueError, RuntimeError) as exc:
+        return JSONResponse({'detail': str(exc)}, status_code=409)
 
 
 if getattr(sys, "frozen", False):
@@ -102,13 +192,16 @@ async def api_check_in(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Missing 'name' in request body"}, status_code=400)
 
     photo = str(data.get("photo", "/static/portraits/default.svg"))
-    access = tuple(data.get("access", ["Lab interior", "Tool area"]))
+    access = tuple(data.get("access", ["Indoor lab", "Tool Area"]))
     checked_in = data.get("checked_in")
     if checked_in:
         checked_in = str(checked_in).strip()
     plaksha_id = data.get("plaksha_id")
     if plaksha_id:
         plaksha_id = str(plaksha_id).strip()
+    phone = data.get("phone")
+    if phone:
+        phone = str(phone).strip()
     person = store.check_in(
         name=name,
         photo=photo,
@@ -116,6 +209,7 @@ async def api_check_in(request: Request) -> JSONResponse:
         checked_in=checked_in,
         is_temp=bool(data.get("is_temp", False)),
         plaksha_id=plaksha_id,
+        phone=phone,
     )
     return JSONResponse({
         "status": "ok",
@@ -354,8 +448,8 @@ def api_list_access_areas() -> JSONResponse:
 
 @app.post("/api/enrolment/complete")
 async def api_enrolment_complete(request: Request) -> JSONResponse:
-    if not request_has_valid_admin_session(request):
-        return JSONResponse({"detail": "Admin session required"}, status_code=401)
+    if denied := reader_guard(request):
+        return denied
     import base64
     import binascii
     import io
@@ -383,7 +477,10 @@ async def api_enrolment_complete(request: Request) -> JSONResponse:
             raise ValueError("Check authorised areas")
         # The browser cannot assert reader success or supply invented credentials.
         if data.get("fingerprint_enrolled") or data.get("nfc_uid") or data.get("credentials"):
-            raise ValueError("Readers are unavailable. Skip credential enrolment.")
+            raise ValueError("Reader credentials must come from an enrollment session")
+        reader_session = data.get('reader_session')
+        if reader_session is not None and (not isinstance(reader_session, str) or len(reader_session) > 100):
+            raise ValueError('Invalid reader session')
         if data.get("access") or data.get("is_temp"):
             raise ValueError("Reload enrolment to use the current fields")
         photo = data.get("photo") or db.DEFAULT_PHOTO
@@ -414,17 +511,184 @@ async def api_enrolment_complete(request: Request) -> JSONResponse:
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(image_bytes)
             photo = f"/static/portraits/{destination.name}"
-        record = db.create_enrolment(**fields, photo=photo, access_area_ids=area_ids)
+        if reader_session:
+            record = await asyncio.to_thread(
+                readers.call, 'save', owner=reader_owner(request), session=reader_session,
+                save=lambda credentials: db.create_enrolment(
+                    **fields, photo=photo, access_area_ids=area_ids, credentials=credentials))
+        else:
+            record = db.create_enrolment(**fields, photo=photo, access_area_ids=area_ids)
     except (ValueError, sqlite3.IntegrityError) as err:
         if destination:
             destination.unlink(missing_ok=True)
-        detail = str(err) if isinstance(err, ValueError) else "This Plaksha ID is already enrolled"
+        detail = str(err) if isinstance(err, ValueError) else db.duplicate_error(err)
         return JSONResponse({"detail": detail}, status_code=409)
     except Exception:
         if destination:
             destination.unlink(missing_ok=True)
         return JSONResponse({"detail": "Could not save. Try again."}, status_code=500)
     return JSONResponse({"status": "ok", "user": record})
+
+
+
+@app.get('/api/credentials')
+def api_list_credentials(request: Request) -> JSONResponse:
+    if not request_has_valid_admin_session(request):
+        return JSONResponse({'error': 'Admin session required'}, status_code=401)
+    cred_type = request.query_params.get('type')
+    q = request.query_params.get('q')
+    try:
+        limit = min(100, max(1, int(request.query_params.get('limit', 100))))
+        offset = max(0, int(request.query_params.get('offset', 0)))
+    except (ValueError, TypeError):
+        limit, offset = 100, 0
+    inventory = readers.fingerprint_inventory()
+    creds, total = db.list_credentials_with_users(credential_type=cred_type or None, query=q or None,
+        limit=limit, offset=offset, sensor_templates=inventory['templates'])
+    return JSONResponse({'credentials': creds, 'total': total, 'limit': limit, 'offset': offset,
+                         'sensor': {k: v for k, v in inventory.items() if k != 'templates'}})
+
+
+@app.post('/api/credentials/refresh')
+async def api_refresh_credentials(request: Request) -> JSONResponse:
+    if denied := reader_guard(request):
+        return denied
+    try:
+        inventory = await asyncio.to_thread(readers.call, 'inventory')
+        return JSONResponse(inventory)
+    except ValueError as err:
+        return JSONResponse({'error': str(err)}, status_code=409)
+
+
+@app.delete('/api/credentials/sensor/{slot}')
+async def api_delete_sensor_credential(slot: int, request: Request) -> JSONResponse:
+    if denied := reader_guard(request):
+        return denied
+    try:
+        from services.pico import template_id
+        slot = template_id(slot)
+        def remove(cleanup):
+            identifier = f'template:{slot}'
+            with db.get_db() as conn:
+                if conn.execute("SELECT 1 FROM credentials WHERE deleted_at IS NULL AND credential_type='fingerprint' AND identifier=?", (identifier,)).fetchone():
+                    raise ValueError('Template has been assigned. Refresh credentials before deleting.')
+                cleanup([identifier])
+                db.log_audit('admin', 'delete_sensor_template', 'credential', entity_id=identifier,
+                             before={'identifier': identifier})
+        await asyncio.to_thread(readers.call, 'manage', change=remove)
+        return JSONResponse({'status': 'ok'})
+    except ValueError as err:
+        return JSONResponse({'error': str(err)}, status_code=409)
+
+
+@app.post('/api/credentials')
+async def api_create_credential(request: Request) -> JSONResponse:
+    if denied := reader_guard(request):
+        return denied
+    import re, sqlite3
+    try:
+        data = await request.json()
+        user_id = int(data.get('user_id'))
+        cred_type = str(data.get('credential_type', 'fingerprint')).strip()
+        identifier = str(data.get('identifier', '')).strip()
+        is_active = bool(data.get('is_active', True))
+        if cred_type not in ('nfc', 'fingerprint'):
+            raise ValueError('Invalid credential type')
+        identifier = db.normalize_credential(cred_type, identifier)
+        if cred_type == 'nfc' and not re.fullmatch(r'(?:[0-9A-F]{8}|[0-9A-F]{14}|[0-9A-F]{20})', identifier):
+            raise ValueError('Enter a 4, 7 or 10 byte NFC UID')
+        if cred_type == 'fingerprint' and not re.fullmatch(r'template:[0-9]+', identifier):
+            raise ValueError('Enter a fingerprint template ID between 1 and 1000')
+        def create(cleanup):
+            now = db.utcnow_iso()
+            with db.get_db() as conn:
+                user = conn.execute('SELECT id, name FROM users WHERE id=? AND deleted_at IS NULL', (user_id,)).fetchone()
+                if not user:
+                    raise ValueError('User not found')
+                dup = conn.execute('SELECT u.name FROM credentials c JOIN users u ON u.id=c.user_id WHERE c.deleted_at IS NULL AND c.credential_type=? AND c.identifier=?', (cred_type, identifier)).fetchone()
+                if dup:
+                    raise ValueError(f'Credential already assigned to {dup["name"]}')
+                cur = conn.execute('INSERT INTO credentials (user_id, credential_type, identifier, is_active, enrolled_at) VALUES (?, ?, ?, ?, ?)', (user_id, cred_type, identifier, int(is_active), now))
+                cred_id = cur.lastrowid
+                conn.execute("INSERT INTO admin_audit_log (occurred_at, actor, action, entity_type, entity_id, before, after) VALUES (?, 'admin', 'create_credential', 'credential', ?, NULL, ?)",
+                             (now, str(cred_id), json.dumps({'user_id': user_id, 'identifier': identifier, 'type': cred_type})))
+            return cred_id
+        verify = int(identifier.split(':')[1]) if cred_type == 'fingerprint' else None
+        cred_id = await asyncio.to_thread(readers.call, 'manage', change=create, verify_template=verify)
+        return JSONResponse({'status': 'ok', 'id': cred_id})
+    except (ValueError, TypeError) as err:
+        return JSONResponse({'error': str(err)}, status_code=422)
+    except sqlite3.IntegrityError as err:
+        return JSONResponse({'error': db.duplicate_error(err)}, status_code=409)
+
+
+@app.patch('/api/credentials/{credential_id}')
+async def api_patch_credential(credential_id: int, request: Request) -> JSONResponse:
+    if denied := reader_guard(request):
+        return denied
+    import re, sqlite3
+    try:
+        data = await request.json()
+        def change(cleanup):
+            now = db.utcnow_iso()
+            with db.get_db() as conn:
+                row = conn.execute('SELECT * FROM credentials WHERE id=? AND deleted_at IS NULL', (credential_id,)).fetchone()
+                if not row:
+                    raise ValueError('Credential not found')
+                before = dict(row)
+                updates = {}
+                if 'identifier' in data:
+                    ident = db.normalize_credential(row['credential_type'], data['identifier'])
+                    if row['credential_type'] == 'fingerprint' and ident != row['identifier']:
+                        raise ValueError('Assign an existing sensor template instead of changing its ID')
+                    if row['credential_type'] == 'nfc' and not re.fullmatch(r'(?:[0-9A-F]{8}|[0-9A-F]{14}|[0-9A-F]{20})', ident):
+                        raise ValueError('Enter a 4, 7 or 10 byte NFC UID')
+                    if row['credential_type'] == 'fingerprint' and not re.fullmatch(r'template:[0-9]+', ident):
+                        raise ValueError('Enter a fingerprint template ID between 1 and 1000')
+                    dup = conn.execute('SELECT u.name FROM credentials c JOIN users u ON u.id=c.user_id WHERE c.deleted_at IS NULL AND c.credential_type=? AND c.identifier=? AND c.id!=?', (row['credential_type'], ident, credential_id)).fetchone()
+                    if dup:
+                        raise ValueError(f'Credential already assigned to {dup["name"]}')
+                    updates['identifier'] = ident
+                if 'is_active' in data:
+                    updates['is_active'] = int(bool(data['is_active']))
+                if 'user_id' in data:
+                    new_uid = int(data['user_id'])
+                    if not conn.execute('SELECT id FROM users WHERE id=? AND deleted_at IS NULL', (new_uid,)).fetchone():
+                        raise ValueError('Target user not found')
+                    updates['user_id'] = new_uid
+                if updates:
+                    set_clauses = ', '.join(f'{k}=?' for k in updates)
+                    conn.execute(f'UPDATE credentials SET {set_clauses} WHERE id=?', (*updates.values(), credential_id))
+                    conn.execute("INSERT INTO admin_audit_log (occurred_at, actor, action, entity_type, entity_id, before, after) VALUES (?, 'admin', 'update_credential', 'credential', ?, ?, ?)",
+                                 (now, str(credential_id), json.dumps({k: before[k] for k in updates if k in before}), json.dumps(updates)))
+        await asyncio.to_thread(readers.call, 'manage', change=change)
+        return JSONResponse({'status': 'ok'})
+    except (ValueError, TypeError) as err:
+        return JSONResponse({'error': str(err)}, status_code=422)
+    except sqlite3.IntegrityError as err:
+        return JSONResponse({'error': db.duplicate_error(err)}, status_code=409)
+
+
+@app.delete('/api/credentials/{credential_id}')
+async def api_delete_credential(credential_id: int, request: Request) -> JSONResponse:
+    if denied := reader_guard(request):
+        return denied
+    try:
+        def do_delete(cleanup):
+            now = db.utcnow_iso()
+            with db.get_db() as conn:
+                row = conn.execute('SELECT * FROM credentials WHERE id=? AND deleted_at IS NULL', (credential_id,)).fetchone()
+                if not row:
+                    raise ValueError('Credential not found')
+                if row['credential_type'] == 'fingerprint':
+                    cleanup([row['identifier']])
+                conn.execute('UPDATE credentials SET deleted_at=?, is_active=0 WHERE id=?', (now, credential_id))
+                conn.execute("INSERT INTO admin_audit_log (occurred_at, actor, action, entity_type, entity_id, before, after) VALUES (?, 'admin', 'delete_credential', 'credential', ?, ?, NULL)",
+                             (now, str(credential_id), json.dumps({'identifier': row['identifier'], 'type': row['credential_type']})))
+        await asyncio.to_thread(readers.call, 'manage', change=do_delete)
+        return JSONResponse({'status': 'ok'})
+    except ValueError as err:
+        return JSONResponse({'error': str(err)}, status_code=404 if 'not found' in str(err).lower() else 409)
 
 
 @app.get("/api/users/search")
@@ -447,6 +711,55 @@ def api_user_details(user_id: int, request: Request) -> JSONResponse:
     if user is None:
         return JSONResponse({"error": "User not found"}, status_code=404)
     return JSONResponse({"user": user})
+
+
+@app.patch('/api/users/{user_id}')
+async def api_edit_person(user_id: int, request: Request):
+    if denied := reader_guard(request):
+        return denied
+    import sqlite3
+    try:
+        changes = await request.json()
+        await asyncio.to_thread(readers.call, 'manage', change=lambda cleanup: edit_person(user_id, changes, cleanup))
+    except MissingPerson as exc:
+        return JSONResponse({'error': str(exc)}, status_code=404)
+    except sqlite3.IntegrityError as exc:
+        return JSONResponse({'error': db.duplicate_error(exc)}, status_code=409)
+    except ValueError as exc:
+        return JSONResponse({'error': str(exc)}, status_code=409)
+    store._notify()
+    return JSONResponse({'user': user_details(user_id)})
+
+
+@app.post('/api/users/delete')
+async def api_delete_people(request: Request):
+    if denied := reader_guard(request):
+        return denied
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) != {'user_ids'}:
+            raise ValueError('Select people to delete')
+        ids = await asyncio.to_thread(readers.call, 'manage', change=lambda cleanup: delete_people(body['user_ids'], cleanup))
+    except MissingPerson as exc:
+        return JSONResponse({'error': str(exc)}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({'error': str(exc)}, status_code=409)
+    store._notify()
+    return JSONResponse({'deleted': ids})
+
+
+@app.delete('/api/users/{user_id}')
+async def api_delete_person(user_id: int, request: Request):
+    if denied := reader_guard(request):
+        return denied
+    try:
+        await asyncio.to_thread(readers.call, 'manage', change=lambda cleanup: delete_people([user_id], cleanup))
+    except MissingPerson as exc:
+        return JSONResponse({'error': str(exc)}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({'error': str(exc)}, status_code=409)
+    store._notify()
+    return JSONResponse({'deleted': [user_id]})
 
 
 @app.get("/api/logs")
@@ -583,7 +896,10 @@ async def api_set_display_settings(screen: str, request: Request) -> JSONRespons
         data = {}
     if not isinstance(data, dict):
         data = {}
-    settings = db.set_screen_settings(screen, data)
+    try:
+        settings = db.set_screen_settings(screen, data)
+    except ValueError as err:
+        return JSONResponse({'error': str(err)}, status_code=422)
     db.log_audit(
         "admin",
         "settings_changed",
@@ -675,11 +991,21 @@ def logs_page(request: Request) -> RedirectResponse | None:
     return None
 
 
-@ui.page("/search", title="LabAuth \u2013 Search", dark=None, favicon=FAVICON_PATH)
+@ui.page("/people", title="LabAuth \u2013 People", dark=None, favicon=FAVICON_PATH)
+@ui.page("/search", title="LabAuth \u2013 People", dark=None, favicon=FAVICON_PATH)
 def search_page(request: Request) -> RedirectResponse | None:
     if not request_has_valid_admin_session(request):
         return RedirectResponse("/admin-display?login=1")
     build_search_page()
+    return None
+
+
+@ui.page("/credentials", title="LabAuth – Credentials", dark=None, favicon=FAVICON_PATH)
+@ui.page("/admin/credentials", title="LabAuth – Credentials", dark=None, favicon=FAVICON_PATH)
+def credentials_page(request: Request) -> RedirectResponse | None:
+    if not request_has_valid_admin_session(request):
+        return RedirectResponse("/admin-display?login=1")
+    build_credentials_page()
     return None
 
 

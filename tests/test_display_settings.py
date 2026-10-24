@@ -31,7 +31,7 @@ def _reset() -> None:
         db.set_screen_settings(screen, dict(db.DEFAULT_SCREEN_SETTINGS))
 
 
-def _person(name: str = "Aisha Khan", access: tuple[str, ...] = ("Laser cutter",)) -> PersonInside:
+def _person(name: str = "Aisha Khan", access: tuple[str, ...] = ("Tool Area",)) -> PersonInside:
     return PersonInside(
         name=name,
         photo="/static/portraits/default.svg",
@@ -67,6 +67,21 @@ def test_partial_updates_preserve_earlier_values():
     assert merged["show_greeter"] is True
 
 
+def test_date_size_persists_per_screen_and_rejects_invalid_values():
+    _reset()
+    assert db.set_screen_settings('display', {'date_size': 24})['date_size'] == 24
+    assert db.get_screen_settings('display')['date_size'] == 24
+    assert db.get_screen_settings('admin-display')['date_size'] == 18
+    for value in (0, 33, True, '24', None):
+        try:
+            db.set_screen_settings('display', {'date_size': value})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f'Accepted invalid size {value!r}')
+    assert db.get_screen_settings('display')['date_size'] == 24
+
+
 def test_old_manual_layout_values_are_ignored():
     _reset()
     obsolete = {"grid_ratio": 90, "max_rows": 1, "row_sizes": [10, 80, 10]}
@@ -96,16 +111,16 @@ def test_person_card_respects_photo_and_access_switches():
 
     full = _person_card(person, density="1row", show_photos=True, show_tools=True)
     assert "person-photo" in full
-    assert "Laser cutter" in full
+    assert "Tool Area" in full
 
     no_photo = _person_card(person, density="1row", show_photos=False, show_tools=True)
     assert "person-photo" not in no_photo
-    assert "Laser cutter" in no_photo
+    assert "Tool Area" in no_photo
     assert "person-card--no-photo" in no_photo
 
     no_tools = _person_card(person, density="1row", show_photos=True, show_tools=False)
     assert "person-photo" in no_tools
-    assert "Laser cutter" not in no_tools
+    assert "Tool Area" not in no_tools
     assert "person-card--no-tools" in no_tools
 
 

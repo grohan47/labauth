@@ -244,7 +244,6 @@ sbb-menu-button {
   justify-content: center;
   align-items: center;
   gap: var(--sbb-spacing-fixed-6x);
-  cursor: pointer;
   user-select: none;
 }
 
@@ -269,6 +268,13 @@ sbb-menu-button {
   margin: 0;
   max-width: 28rem;
 }
+
+#fp-guidance {
+  color: var(--display-text);
+  min-height: 1.5em;
+}
+
+#fp-error, #nfc-error { width: min(32rem, 100%); }
 
 /* Transit Tap Card GIF */
 .nfc-tap-animation {

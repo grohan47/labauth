@@ -11,6 +11,7 @@ from ui.lyne import (
     card,
     card_button,
     card_link,
+    checkbox,
     container,
     element,
     form_field,
@@ -60,6 +61,7 @@ def destroy_admin_session(token: str | None) -> None:
 
 ADMIN_ICONS_JS = """
 const ADMIN_ICONS = {
+    'user-group-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="#000" fill-rule="evenodd" d="M18 10.249c.728 0 1.384.285 1.925.773l.031.029q.094.086.182.18c.675.721 1.111 1.787 1.111 3.021q0 .113-.012.227l-.012.122-.009.08-.009.085v.002c-.208 2.056-1.57 3.484-3.207 3.484-1.61 0-2.952-1.38-3.195-3.379l-.012-.107-.015-.145c-.016-.139-.029-.249-.029-.37 0-1.34.517-2.483 1.295-3.2l.05-.047c.538-.477 1.186-.755 1.906-.755m-3.264 7.224a5.4 5.4 0 0 1-.793-1.767 3.74 3.74 0 0 1-1.944.546 3.84 3.84 0 0 1-2.606-1.016c-3.137 1.93-4.925 5.01-5.126 9.01h5.458c.774-2.864 2.478-5.172 5.01-6.773m-5.24 7.773q-.224 1.193-.245 2.497l-.009.508h17.546l-.039-.536a18 18 0 0 0-.336-2.465h6.375l-.039-.535c-.308-4.336-1.906-7.915-5.493-10.21.631-.886.994-2.032.994-3.254 0-2.683-1.75-5.002-4.25-5.002-2.028 0-3.555 1.541-4.056 3.546a3.73 3.73 0 0 0-3.888 0C15.556 7.79 14.03 6.249 12 6.249c-2.497 0-4.25 2.319-4.25 5.003 0 1.208.356 2.342.975 3.223-3.489 2.21-5.4 5.763-5.474 10.262l-.008.509h6.255M24 16.252a3.83 3.83 0 0 0 2.58-.991c3.206 1.99 4.74 5.078 5.127 8.99h-5.54c-.783-2.786-2.337-5.1-4.922-6.751.37-.522.646-1.134.81-1.795a3.73 3.73 0 0 0 1.945.547m-1.77-1.643c.51.408 1.11.643 1.77.643 1.776 0 3.25-1.682 3.25-4 0-2.32-1.475-4.003-3.25-4.003-1.573 0-2.893 1.321-3.178 3.25l.044.046c.865.921 1.384 2.24 1.384 3.707q-.001.16-.016.311zM18 19.252a3.8 3.8 0 0 1-2.597-1.017c-3.143 1.93-4.936 5.013-5.136 9.016h15.44c-.387-3.915-1.923-7.003-5.135-8.993a3.8 3.8 0 0 1-2.572.994M12 7.25c-1.774 0-3.25 1.682-3.25 4.003 0 2.318 1.475 4 3.25 4 .66 0 1.26-.234 1.77-.642a4 4 0 0 1-.02-.358c0-1.492.538-2.83 1.428-3.753-.284-1.928-1.604-3.25-3.179-3.25" clip-rule="evenodd"/></svg>',
     'fingerprint-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="currentColor" fill-rule="evenodd" d="M11.642 4.402a23 23 0 0 1 2.607-.153c4.36 0 8.432 1.2 11.93 3.273l.51-.86a24.3 24.3 0 0 0-12.44-3.413c-.923 0-1.829.058-2.72.16zm-5.443 3.42a21.4 21.4 0 0 1 8.05-1.573c6.312 0 11.971 2.738 15.902 7.067l-.74.672C25.66 9.857 20.265 7.249 14.25 7.249c-2.715 0-5.302.54-7.675 1.5zm8.05 2.428c-3.306 0-6.388.934-9.028 2.53l-.518-.856A18.4 18.4 0 0 1 14.25 9.25c6.866 0 12.842 3.748 16.034 9.297l-.867.498c-3.021-5.253-8.675-8.795-15.167-8.795M5.273 20.574a11.47 11.47 0 0 1 8.978-4.324c6.322 0 11.448 5.103 11.495 11.414l1-.008c-.05-6.86-5.623-12.406-12.495-12.406-3.952 0-7.47 1.84-9.759 4.7zM4.181 15.98A15.43 15.43 0 0 1 14.25 12.25c7.052 0 12.992 4.713 14.871 11.156l-.96.28C26.403 17.657 20.844 13.25 14.25 13.25a14.43 14.43 0 0 0-9.418 3.489zm4.578 11.692a5.495 5.495 0 0 1 10.991.079v4.044h1V27.75a6.495 6.495 0 0 0-12.991-.094zM5.6 23.835c1.492-3.29 4.798-5.585 8.65-5.585a9.5 9.5 0 0 1 9.5 9.5v2.645h-1V27.75a8.5 8.5 0 0 0-8.5-8.5c-3.443 0-6.403 2.051-7.739 4.998zm8.65.415a3.5 3.5 0 0 0-3.5 3.5v2.645h1V27.75a2.5 2.5 0 1 1 5 0v4.5h1v-4.5a3.5 3.5 0 0 0-3.5-3.5m-.5 7.25V27h1v4.5z" clip-rule="evenodd"/></svg>',
     'fingerprint-small': '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M7.78 3.1q.85-.098 1.719-.1c2.876 0 5.561.791 7.869 2.158l.51-.86a16.4 16.4 0 0 0-8.379-2.299c-.622 0-1.232.04-1.832.108zM4.07 5.06A14.45 14.45 0 0 1 9.5 4c4.257 0 8.073 1.846 10.724 4.765l-.74.672C17.013 6.717 13.461 5 9.5 5c-1.788 0-3.49.355-5.054.987zM9.5 7c-2.173 0-4.198.613-5.933 1.663l-.518-.856A12.43 12.43 0 0 1 9.5 6c4.64 0 8.678 2.533 10.834 6.281l-.866.499C17.48 9.327 13.765 7 9.5 7m-5.855 6.82A7.48 7.48 0 0 1 9.5 11a7.5 7.5 0 0 1 7.497 7.444l1-.008A8.5 8.5 0 0 0 9.5 10a8.48 8.48 0 0 0-6.636 3.195zm-.966-3.294A10.45 10.45 0 0 1 9.499 8c4.778 0 8.802 3.193 10.075 7.557l-.96.28C17.462 11.887 13.82 9 9.5 9a9.45 9.45 0 0 0-6.17 2.286zm3.327 7.924A3.497 3.497 0 0 1 13 18.5v2.696h1V18.5a4.497 4.497 0 0 0-8.994-.065zM3.582 15.82A6.497 6.497 0 0 1 16 18.501v1.763h-1V18.5a5.497 5.497 0 0 0-10.507-2.266zM9.5 16A2.5 2.5 0 0 0 7 18.5v1.763h1V18.5a1.5 1.5 0 1 1 3 0v3h1v-3A2.5 2.5 0 0 0 9.5 16M9 21v-3h1v3z" clip-rule="evenodd"/></svg>',
     'document-text-medium': '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36"><path fill="currentColor" fill-rule="evenodd" d="M9.252 6.245h9.707l.147.146 7.5 7.5.146.146v15.708h-17.5v-23.5m1 1v21.5h15.5v-14h-7.5v-7.5zm9 .707 5.793 5.793h-5.793zM13.5 19.25h9v-1h-9zm9 3h-9.004v-1H22.5zm-9 3h9v-1h-9z" clip-rule="evenodd"/></svg>',
@@ -180,6 +182,7 @@ def build_admin_panel() -> None:
         </script>
         {lyne_assets()}
         <script type="module" src="{asset_url("admin-panel.js")}"></script>
+        <script type="module" src="{asset_url("readers.js")}"></script>
     """)
 
     def admin_card(label, *, icon_name, href=None, card_id="", action_id=""):
@@ -195,7 +198,8 @@ def build_admin_panel() -> None:
     cards = "".join((
         admin_card("Enrollment", icon_name="fingerprint-medium", href="/enrollment"),
         admin_card("Logs", icon_name="document-text-medium", href="/logs"),
-        admin_card("Search", icon_name="magnifying-glass-medium", href="/search"),
+        admin_card("People", icon_name="user-group-medium", href="/people"),
+        admin_card("Credentials", icon_name="fingerprint-medium", href="/credentials"),
         admin_card(
             "Alerts",
             icon_name="sign-exclamation-point-medium",
@@ -289,10 +293,44 @@ def build_admin_panel() -> None:
         backdrop="translucent",
         backdrop_action="close",
     )
+    reader_controls = element(
+        "section",
+        element("sbb-title", "Readers", level=2, visual_level=4)
+        + element(
+            "div",
+            element("div", element("span", "Connection", css_class="reader-status-label")
+                    + element("span", "Loading", id="reader-connection", role="status"), css_class="reader-status-row")
+            + element("div", element("span", "Fingerprint", css_class="reader-status-label")
+                    + element("span", "—", id="reader-fingerprint-status"), css_class="reader-status-row")
+            + element("div", element("span", "NFC", css_class="reader-status-label")
+                    + element("span", "—", id="reader-nfc-status"), css_class="reader-status-row"),
+            css_class="reader-status-list",
+        )
+        + element(
+            "div",
+            checkbox("Fingerprint", name="reader", value="fingerprint", id="reader-fingerprint-enabled")
+            + checkbox("NFC", name="reader", value="nfc", id="reader-nfc-enabled"),
+            css_class="reader-enable-controls",
+            aria_label="Enabled readers",
+        )
+        + element(
+            "div",
+            "".join(button(mode.title(), variant="secondary", html_id=f"reader-mode-{mode.lower()}",
+                           type_="button", aria_pressed="false", data_reader_mode=mode)
+                    for mode in ("POLL", "CHECK", "IDLE")),
+            css_class="reader-mode-controls",
+            role="group",
+            aria_label="Reader mode",
+        )
+        + element("p", "", id="reader-control-error", role="alert", hidden=True),
+        id="admin-reader-controls",
+        css_class="admin-reader-controls",
+        aria_label="Reader controls",
+    )
     admin_markup = element(
         "main",
         container(
-            header + element("div", cards, css_class="admin-cards-grid") + alerts_dialog,
+            header + element("div", cards, css_class="admin-cards-grid") + reader_controls + alerts_dialog,
             expanded=True,
             css_class="admin-panel-shell",
         ),

@@ -1,4 +1,4 @@
-"""Read-only user search and registered profiles, including retained accounts."""
+"""People search and registered profiles, including inactive accounts."""
 from services.log_queries import reader
 from datetime import datetime
 
@@ -9,7 +9,8 @@ def search_users(query='', *, limit=50, offset=0):
     if not 1 <= limit <= 100 or offset < 0:
         raise ValueError('Choose a valid page.')
     term = query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-    predicate = " WHERE name LIKE :q ESCAPE '\\' OR plaksha_id LIKE :q ESCAPE '\\' OR email LIKE :q ESCAPE '\\' OR phone LIKE :q ESCAPE '\\'" if term else ''
+    predicate = " AND (name LIKE :q ESCAPE '\\' OR plaksha_id LIKE :q ESCAPE '\\' OR email LIKE :q ESCAPE '\\' OR phone LIKE :q ESCAPE '\\')" if term else ''
+    predicate = ' WHERE deleted_at IS NULL' + predicate
     params = {'q': '%' + term + '%', 'limit': limit, 'offset': offset}
     with reader() as connection:
         connection.execute('BEGIN')
@@ -22,7 +23,7 @@ def search_users(query='', *, limit=50, offset=0):
 def user_details(user_id):
     with reader() as connection:
         connection.execute('BEGIN')
-        row = connection.execute('SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
+        row = connection.execute('SELECT * FROM users WHERE deleted_at IS NULL AND id=?', (user_id,)).fetchone()
         if row is None:
             return None
         user = dict(row)
@@ -33,7 +34,7 @@ def user_details(user_id):
         # Credentials are shown as registrations, never raw biometric bytes.
         user['credentials'] = [dict(r) for r in connection.execute('''
             SELECT id,credential_type,identifier,is_active,enrolled_at,
-            LENGTH(template) AS template_bytes FROM credentials WHERE user_id=?
+            LENGTH(template) AS template_bytes FROM credentials WHERE deleted_at IS NULL AND user_id=?
             ORDER BY enrolled_at,id''', (user_id,))]
         user['bans'] = [dict(r) for r in connection.execute('SELECT * FROM bans WHERE user_id=? ORDER BY banned_at DESC,id DESC', (user_id,))]
         current = connection.execute('SELECT checked_in_at FROM current_presence WHERE user_id=?', (user_id,)).fetchone()
